@@ -1,0 +1,15 @@
+node_modules/
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local runtime config (may contain secrets)
+config.json
+.env
+.env.*
+
+# OS/editor
+.DS_Store
+Thumbs.db
