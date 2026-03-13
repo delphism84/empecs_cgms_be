@@ -7,31 +7,95 @@ import Event from '../models/Event.js';
 
 const router = express.Router();
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 function sign(user) {
   return jwt.sign({ sub: user._id.toString(), email: user.email }, config.jwtSecret, { expiresIn: '7d' });
 }
 
+function toUserId(id) {
+  return id ? `usr_${id.toString()}` : id;
+}
+
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, name } = req.body || {};
-    if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
-    const exists = await User.findOne({ email }).lean();
-    if (exists) return res.status(409).json({ error: 'email already exists' });
+    const body = req.body || {};
+    const {
+      email,
+      password,
+      firstName,
+      lastName,
+      dateOfBirth,
+      gender,
+      unit,
+      countryCode,
+      language,
+      agreeTerms,
+      agreeResidence,
+    } = body;
+
+    // validation
+    const fields = [];
+    if (!email || typeof email !== 'string') fields.push('email');
+    else if (!EMAIL_RE.test(email.trim())) {
+      return res.status(400).json({ ok: false, error: 'invalid_email' });
+    }
+    if (!password || typeof password !== 'string') fields.push('password');
+    else if (password.length < 8) {
+      return res.status(400).json({ ok: false, error: 'password_too_short' });
+    }
+    if (!firstName || typeof firstName !== 'string') fields.push('firstName');
+    if (!lastName || typeof lastName !== 'string') fields.push('lastName');
+    if (!dateOfBirth || typeof dateOfBirth !== 'string') fields.push('dateOfBirth');
+    else if (!ISO_DATE_RE.test(dateOfBirth.trim())) {
+      return res.status(422).json({ ok: false, error: 'validation_failed', fields: ['dateOfBirth'] });
+    }
+    if (agreeTerms !== true) fields.push('agreeTerms');
+
+    if (fields.length) {
+      return res.status(422).json({ ok: false, error: 'validation_failed', fields });
+    }
+
+    const exists = await User.findOne({ email: email.trim().toLowerCase() }).lean();
+    if (exists) return res.status(409).json({ ok: false, error: 'email_exists' });
+
     const passwordHash = await User.hashPassword(password);
-    const user = await User.create({ email, passwordHash, passwordOrg: password, name });
-    return res.json({ token: sign(user), user: { id: user._id, email: user.email, name: user.name } });
+    const user = await User.create({
+      email: email.trim().toLowerCase(),
+      passwordHash,
+      passwordOrg: password,
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      dateOfBirth: dateOfBirth.trim(),
+      gender: gender === 'male' || gender === 'female' ? gender : undefined,
+      unit: unit === 'mmol' ? 'mmol' : 'mg/dL',
+      countryCode: countryCode || undefined,
+      language: language || undefined,
+    });
+
+    return res.status(201).json({
+      ok: true,
+      token: sign(user),
+      user: {
+        id: toUserId(user._id),
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      },
+    });
   } catch (e) {
-    return res.status(500).json({ error: 'register_failed' });
+    return res.status(500).json({ ok: false, error: 'internal_error' });
   }
 });
 
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
-    const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ error: 'invalid_credentials' });
+    const user = await User.findOne({ email: (email || '').trim().toLowerCase() });
+    if (!user) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
     const ok = await user.verifyPassword(password || '');
-    if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
+    if (!ok) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
     // ensure 1-week mock data exists for this user
     try {
       const now = new Date();
@@ -64,9 +128,9 @@ router.post('/login', async (req, res) => {
         if (evs.length) await Event.insertMany(evs, { ordered: false });
       }
     } catch (_) {}
-    return res.json({ token: sign(user), user: { id: user._id, email: user.email, name: user.name } });
+    return res.status(200).json({ token: sign(user) });
   } catch (e) {
-    return res.status(500).json({ error: 'login_failed' });
+    return res.status(500).json({ ok: false, error: 'internal_error' });
   }
 });
 

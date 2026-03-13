@@ -8,6 +8,14 @@ const UserSchema = new mongoose.Schema(
     // debug only (to be removed later)
     passwordOrg: { type: String },
     name: { type: String },
+    // req_be_account fields
+    firstName: { type: String },
+    lastName: { type: String },
+    dateOfBirth: { type: String },
+    gender: { type: String },
+    unit: { type: String, enum: ['mg/dL', 'mmol'], default: 'mg/dL' },
+    countryCode: { type: String },
+    language: { type: String },
   },
   { timestamps: true }
 );
