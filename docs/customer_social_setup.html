@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EMPECS CGMS 소셜 로그인 - 고객 설정 가이드</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Malgun Gothic', '맑은 고딕', system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 24px 20px; line-height: 1.6; color: #333; }
+    h1 { font-size: 1.35rem; margin-bottom: 8px; color: #111; }
+    h2 { font-size: 1.1rem; margin-top: 28px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #ddd; color: #222; }
+    .sub { color: #666; font-size: 0.9rem; margin-bottom: 24px; }
+    .step { margin-bottom: 20px; padding: 14px; background: #f8f9fa; border-radius: 8px; border-left: 3px solid #0066cc; }
+    .step strong { display: block; margin-bottom: 6px; color: #0066cc; }
+    .copy-box { position: relative; margin: 10px 0; padding: 12px 44px 12px 12px; background: #fff; border: 1px solid #ddd; border-radius: 6px; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; word-break: break-all; }
+    .copy-box .val { color: #0a5; }
+    .copy-btn { position: absolute; top: 8px; right: 8px; padding: 4px 10px; font-size: 12px; border: 1px solid #0066cc; background: #fff; color: #0066cc; border-radius: 4px; cursor: pointer; }
+    .copy-btn:hover { background: #0066cc; color: #fff; }
+    .copy-btn.done { border-color: #0a5; color: #0a5; }
+    .note { font-size: 0.9rem; color: #666; margin-top: 8px; }
+    .warn { color: #c60; font-size: 0.9rem; }
+    ul { margin: 8px 0; padding-left: 20px; }
+    a { color: #0066cc; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>EMPECS CGMS 소셜 로그인 설정 가이드</h1>
+  <p class="sub">고객 담당자: 아래 URL을 그대로 복사하여 각 소셜 사이트 콘솔에 붙여넣기 하세요.</p>
+
+  <!-- Google -->
+  <h2>1. Google Cloud Console</h2>
+  <p><a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> → APIs & Services → Credentials → OAuth 2.0 Client IDs → Web application</p>
+
+  <div class="step">
+    <strong>1-1. Authorized redirect URIs</strong>
+    <div class="copy-box">
+      <span class="val" data-copy>https://empecs.lunarsystem.co.kr/api/auth/google/callback</span>
+      <button type="button" class="copy-btn" onclick="copy(this)">복사</button>
+    </div>
+  </div>
+
+  <div class="step">
+    <strong>1-2. Authorized JavaScript origins</strong>
+    <div class="copy-box">
+      <span class="val" data-copy>https://empecs.lunarsystem.co.kr</span>
+      <button type="button" class="copy-btn" onclick="copy(this)">복사</button>
+    </div>
+  </div>
+
+  <p class="note">생성 후 <strong>Client ID</strong>, <strong>Client Secret</strong>을 서버 담당자에게 전달하세요.</p>
+
+  <!-- Kakao -->
+  <h2>2. Kakao Developers</h2>
+  <p><a href="https://developers.kakao.com/console/app" target="_blank" rel="noopener">내 애플리케이션</a> → 해당 앱 → 플랫폼 → Web → Redirect URI</p>
+
+  <div class="step">
+    <strong>2-1. Redirect URI</strong>
+    <div class="copy-box">
+      <span class="val" data-copy>https://empecs.lunarsystem.co.kr/api/auth/kakao/callback</span>
+      <button type="button" class="copy-btn" onclick="copy(this)">복사</button>
+    </div>
+  </div>
+
+  <p class="note">동의항목에서 이메일·프로필 활성화 후, <strong>REST API 키</strong>를 서버 담당자에게 전달하세요.</p>
+
+  <!-- Apple -->
+  <h2>3. Apple Developer (Sign in with Apple)</h2>
+  <p>Apple Developer → Certificates, Identifiers & Profiles → Identifiers → Services ID</p>
+
+  <div class="step">
+    <strong>3-1. Services ID (Identifier)</strong>
+    <div class="copy-box">
+      <span class="val" data-copy>com.empecs.cg21.web</span>
+      <button type="button" class="copy-btn" onclick="copy(this)">복사</button>
+    </div>
+  </div>
+
+  <div class="step">
+    <strong>3-2. Redirect URL (Sign in with Apple 설정 시)</strong>
+    <div class="copy-box">
+      <span class="val" data-copy>https://empecs.lunarsystem.co.kr/auth/callback</span>
+      <button type="button" class="copy-btn" onclick="copy(this)">복사</button>
+    </div>
+    <p class="note">FE 로그인 완료 후 토큰 수신 페이지와 동일합니다. Google/Kakao OAuth 후 BE가 리다이렉트하는 경로(<code>#token=</code>)와 맞춥니다.</p>
+  </div>
+
+  <p class="note">Key ID, Team ID, .p8 Private Key가 필요하면 서버 담당자와 협의하세요.</p>
+
+  <!-- 요약 -->
+  <h2>4. 전달 항목 요약</h2>
+  <table style="width:100%; border-collapse: collapse; font-size: 0.9rem;">
+    <tr style="background:#f0f0f0;"><th style="padding:8px; text-align:left; border:1px solid #ddd;">Provider</th><th style="padding:8px; text-align:left; border:1px solid #ddd;">서버 담당자에게 전달</th></tr>
+    <tr><td style="padding:8px; border:1px solid #ddd;">Google</td><td style="padding:8px; border:1px solid #ddd;">Client ID, Client Secret</td></tr>
+    <tr><td style="padding:8px; border:1px solid #ddd;">Kakao</td><td style="padding:8px; border:1px solid #ddd;">REST API 키</td></tr>
+    <tr><td style="padding:8px; border:1px solid #ddd;">Apple</td><td style="padding:8px; border:1px solid #ddd;">필요 시 Key ID, Team ID, .p8 Private Key</td></tr>
+  </table>
+
+  <p class="note" style="margin-top:16px;">— EMPECS CGMS · empecs.lunarsystem.co.kr —</p>
+
+  <script>
+    function copy(btn) {
+      const box = btn.closest('.copy-box');
+      const el = box.querySelector('[data-copy]');
+      const text = el ? el.textContent.trim() : box.textContent.replace(/복사$/,'').trim();
+      navigator.clipboard.writeText(text).then(function() {
+        btn.textContent = '복사됨';
+        btn.classList.add('done');
+        setTimeout(function() { btn.textContent = '복사'; btn.classList.remove('done'); }, 1500);
+      }).catch(function() {
+        prompt('아래 값을 복사하세요:', text);
+      });
+    }
+  </script>
+</body>
+</html>

@@ -3,8 +3,10 @@ import bcrypt from 'bcryptjs';
 
 const UserSchema = new mongoose.Schema(
   {
-    email: { type: String, unique: true, required: true, index: true },
-    passwordHash: { type: String, required: true },
+    email: { type: String, required: true },
+    passwordHash: { type: String }, // 소셜 로그인 시 null 허용
+    provider: { type: String, enum: ['google', 'kakao', 'apple', null], default: null },
+    providerId: { type: String }, // sub / id (provider별 고유 ID)
     // debug only (to be removed later)
     passwordOrg: { type: String },
     name: { type: String },
@@ -20,7 +22,13 @@ const UserSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// 소셜 로그인: (provider, providerId) 유일
+UserSchema.index({ provider: 1, providerId: 1 }, { unique: true, sparse: true });
+// 이메일/비밀번호 계정: email 유일 (provider null인 경우만)
+UserSchema.index({ email: 1 }, { unique: true, partialFilterExpression: { provider: null } });
+
 UserSchema.methods.verifyPassword = function (plain) {
+  if (!this.passwordHash) return Promise.resolve(false);
   return bcrypt.compare(plain, this.passwordHash);
 };
 

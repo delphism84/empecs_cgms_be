@@ -1,7 +1,22 @@
 {
   "MongoDb": {
-    "ConnectionString": "mongodb://localhost:27017/empecs_cgms",
+    "ConnectionString": "mongodb://admin:Empecs%21%4034@127.0.0.1:47011/empecs_cgms?authSource=admin",
     "DatabaseName": "empecs_cgms"
+  },
+  "Admin": {
+    "Username": "admin",
+    "Password": "Empecs!@34"
+  },
+  "OAuth": {
+    "BaseUrl": "https://empecs.lunarsystem.co.kr",
+    "GoogleClientId": "",
+    "GoogleClientSecret": "",
+    "KakaoRestApiKey": "",
+    "KakaoClientSecret": "",
+    "AppleClientId": "",
+    "AppleTeamId": "",
+    "AppleKeyId": "",
+    "ApplePrivateKey": ""
   }
 }
 

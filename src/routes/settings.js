@@ -5,6 +5,7 @@ import Sensor from '../models/Sensor.js';
 import Alarm from '../models/Alarm.js';
 import AppSetting from '../models/AppSetting.js';
 import Eq from '../models/Eq.js';
+import { normalizeBleMac, normalizeSerialQuery, userOwnsEq } from '../lib/eqNormalize.js';
 
 const router = express.Router();
 
@@ -100,6 +101,59 @@ router.put('/app', auth, async (req, res) => {
 });
 
 // eq list (device registry): manage start date per serial
+// NB: /eq-list/resolve must be registered before /eq-list/:serial
+router.get('/eq-list/resolve', auth, async (req, res) => {
+  const hasSerialParam = req.query.serial !== undefined && String(req.query.serial).trim() !== '';
+  const hasMacParam = req.query.bleMac !== undefined && String(req.query.bleMac).trim() !== '';
+  if (!hasSerialParam && !hasMacParam) {
+    return res.status(400).json({ error: 'serial_or_bleMac_required' });
+  }
+  const serialQ = hasSerialParam ? normalizeSerialQuery(req.query.serial) : null;
+  const bleMacQ = hasMacParam ? normalizeBleMac(req.query.bleMac) : null;
+  if (hasSerialParam && !serialQ) return res.status(400).json({ error: 'invalid_serial' });
+  if (hasMacParam && !bleMacQ) return res.status(400).json({ error: 'invalid_bleMac' });
+  if (!serialQ && !bleMacQ) return res.status(400).json({ error: 'serial_or_bleMac_required' });
+
+  const userId = req.userId;
+  /** @type {Array<{ doc: Record<string, unknown> & { _id: { toString(): string } }; matchedBy: 'serial' | 'bleMac' }>} */
+  const candidates = [];
+
+  if (serialQ) {
+    const bySerial = await Eq.findOne({ serial: serialQ }).lean();
+    if (bySerial && userOwnsEq(bySerial, userId)) candidates.push({ doc: bySerial, matchedBy: 'serial' });
+  }
+  if (bleMacQ) {
+    const byMac = await Eq.findOne({ bleMac: bleMacQ }).lean();
+    if (byMac && userOwnsEq(byMac, userId)) {
+      const dup = candidates.some((c) => c.doc._id.toString() === byMac._id.toString());
+      if (!dup) candidates.push({ doc: byMac, matchedBy: 'bleMac' });
+    }
+  }
+
+  let chosen = candidates.find((c) => c.matchedBy === 'serial') || candidates[0];
+  if (serialQ && bleMacQ && candidates.length > 1) {
+    const serialCand = candidates.find((c) => c.matchedBy === 'serial');
+    if (serialCand) chosen = serialCand;
+  }
+
+  if (!chosen) return res.status(404).json({ error: 'not_found' });
+
+  const doc = chosen.doc;
+  const EQ_VALIDITY_DAYS = Math.max(1, Math.min(90, Number(process.env.EQ_VALIDITY_DAYS || 14)));
+  const startMs = new Date(doc.startAt).getTime();
+  const endMs = startMs + EQ_VALIDITY_DAYS * 24 * 60 * 60 * 1000;
+  const remainingMinutes = Math.max(0, Math.floor((endMs - Date.now()) / 60000));
+
+  return res.json({
+    matchedBy: chosen.matchedBy,
+    serial: doc.serial,
+    bleMac: doc.bleMac ?? null,
+    startAt: new Date(doc.startAt).toISOString(),
+    remainingMinutes,
+    _id: doc._id?.toString?.(),
+  });
+});
+
 router.get('/eq-list/:serial', auth, async (req, res) => {
   const { serial } = req.params;
   const doc = await Eq.findOne({ serial: serial.toUpperCase() }).lean();
@@ -108,19 +162,26 @@ router.get('/eq-list/:serial', auth, async (req, res) => {
 
 router.post('/eq-list', auth, async (req, res) => {
   try {
-    const { serial, startAt } = req.body || {};
+    const { serial, startAt, bleMac: bleMacRaw } = req.body || {};
     if (!serial || typeof serial !== 'string' || serial.trim().length === 0) {
       return res.status(400).json({ error: 'invalid_serial' });
     }
     const sn = serial.toUpperCase().trim();
     const start = startAt ? new Date(startAt) : new Date();
+    const macNorm = bleMacRaw != null && String(bleMacRaw).trim() !== '' ? normalizeBleMac(bleMacRaw) : null;
+    if (bleMacRaw != null && String(bleMacRaw).trim() !== '' && !macNorm) {
+      return res.status(400).json({ error: 'invalid_bleMac' });
+    }
+    const set = { updatedBy: req.userId, userId: req.userId };
+    if (macNorm) set.bleMac = macNorm;
     const updated = await Eq.findOneAndUpdate(
       { serial: sn },
-      { $setOnInsert: { startAt: start, createdBy: req.userId }, $set: { updatedBy: req.userId } },
+      { $setOnInsert: { startAt: start, createdBy: req.userId }, $set: set },
       { new: true, upsert: true }
     );
     return res.json(updated);
   } catch (e) {
+    if (e && e.code === 11000) return res.status(409).json({ error: 'bleMac_conflict' });
     return res.status(400).json({ error: 'eq_upsert_failed' });
   }
 });

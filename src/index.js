@@ -5,8 +5,11 @@ import mongoose from 'mongoose';
 import { config } from './config.js';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const publicDir = path.join(__dirname, '..', 'public');
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -85,12 +88,43 @@ import './models/Eq.js';
 import authRouter from './routes/auth.js';
 import dataRouter from './routes/data.js';
 import settingsRouter from './routes/settings.js';
+import adminRouter from './routes/admin.js';
 
 app.use('/api/auth', authRouter);
 app.use('/api/data', dataRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/admin', adminRouter);
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// FE 참조용 API 문서 (Markdown). nginx: location ^~ /api/ → BE
+function sendMarkdownDoc(relName) {
+  return (_req, res, next) => {
+    const p = path.join(__dirname, '..', 'docs', relName);
+    if (!fs.existsSync(p)) return res.status(404).type('text/plain').send(`${relName} not found`);
+    res.type('text/markdown; charset=utf-8');
+    res.set('Cache-Control', 'public, max-age=120');
+    res.sendFile(p, (err) => (err ? next(err) : undefined));
+  };
+}
+app.get('/api/docs', sendMarkdownDoc('api.md'));
+app.get('/api/docs/api.md', sendMarkdownDoc('api.md'));
+app.get('/api/docs/api_rev_260417a.md', sendMarkdownDoc('api_rev_260417a.md'));
+
+// 소셜 로그인 테스트 페이지
+const logintestPath = path.join(publicDir, 'logintest.html');
+const redirectPath = path.join(publicDir, 'logintest-redirect.html');
+if (fs.existsSync(logintestPath)) {
+  app.get('/logintest.html', (_req, res) => res.type('text/html').send(fs.readFileSync(logintestPath, 'utf-8')));
+}
+// 리다이렉트 전용 (redirectURI: /auth/callback)
+if (fs.existsSync(redirectPath)) {
+  const redirectHtml = fs.readFileSync(redirectPath, 'utf-8');
+  app.get('/logintest-redirect.html', (_req, res) => res.type('text/html').send(redirectHtml));
+  app.get('/auth/callback', (_req, res) => res.type('text/html').send(redirectHtml));
+} else if (fs.existsSync(logintestPath)) {
+  app.get('/auth/callback', (_req, res) => res.type('text/html').send(fs.readFileSync(logintestPath, 'utf-8')));
+}
 
 async function main() {
   await connectMongo();

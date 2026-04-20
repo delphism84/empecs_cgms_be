@@ -9,6 +9,10 @@ yarn-error.log*
 config.json
 .env
 .env.*
+.envarchive
+
+# docker/local mongo data
+data/
 
 # OS/editor
 .DS_Store

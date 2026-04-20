@@ -1,0 +1,57 @@
+# EMPECS CGMS — Mongo + BE + Admin FE
+# 이 디렉터리에서: docker compose up -d --build
+# DB 초기화(데이터 삭제): docker compose down && rm -rf ./data/mongo && docker compose up -d
+#
+# 호스트 포트(nginx / 기존 앱과 동일): Mongo 47011 · BE 63101 · Admin FE 63103
+
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: empecs-cgms-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: Empecs!@34
+    volumes:
+      - ./data/mongo:/data/db
+    command: ["mongod", "--bind_ip_all", "--auth"]
+    ports:
+      - "127.0.0.1:47011:27017"
+
+  be:
+    build: .
+    container_name: empecs-cgms-be
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      HOST: 0.0.0.0
+      PORT: "58002"
+      JWT_SECRET: "${JWT_SECRET:-change-me}"
+      MONGO_URI: "mongodb://admin:Empecs%21%4034@mongo:27017/empecs_cgms?authSource=admin"
+      MONGO_DB: "empecs_cgms"
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-Empecs!@34}"
+    ports:
+      - "127.0.0.1:63101:58002"
+    volumes:
+      - ./data/logs:/app/logs
+
+  fe:
+    build:
+      context: ../empecs/cgms/cgms_admin_fe
+      dockerfile: Dockerfile
+      args:
+        # FE 컨테이너가 직접 :63103 으로 열릴 때 /api 를 같은 스택의 BE 로 넘김 (nginx 경유 배포는 여전히 nginx가 /api 분기)
+        API_PROXY_TARGET: http://be:58002
+    container_name: empecs-cgms-admin-fe
+    restart: unless-stopped
+    depends_on:
+      - be
+    environment:
+      NODE_ENV: production
+      # 비우면 브라우저가 동일 호스트로 /api 요청 → nginx → BE (기존 라우팅 유지)
+      NEXT_PUBLIC_API_BASE_URL: ""
+    ports:
+      - "127.0.0.1:63103:3000"
+
