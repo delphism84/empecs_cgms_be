@@ -22,8 +22,14 @@ const UserSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// 소셜 로그인: (provider, providerId) 유일
-UserSchema.index({ provider: 1, providerId: 1 }, { unique: true, sparse: true });
+// 소셜 로그인만 (provider, providerId) 유일 — 로컬 계정(provider null)은 제외하지 않으면 {null,null} 중복으로 E11000 발생
+UserSchema.index(
+  { provider: 1, providerId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { provider: { $in: ['google', 'kakao', 'apple'] } },
+  }
+);
 // 이메일/비밀번호 계정: email 유일 (provider null인 경우만)
 UserSchema.index({ email: 1 }, { unique: true, partialFilterExpression: { provider: null } });
 

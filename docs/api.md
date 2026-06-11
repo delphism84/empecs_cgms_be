@@ -1,14 +1,15 @@
 # EMPECS CGMS Backend — HTTP API (FE 연동용)
 
-> 이 문서는 `empecs_cgms_be` Express API를 프론트엔드에서 호출할 때의 계약을 정리합니다.  
+> 이 문서는 EMPECS CGMS 백엔드(`empecs/cgms/cgms_be`) Express API를 프론트엔드에서 호출할 때의 계약을 정리합니다.  
 > 라우트·응답 형식이 바뀔 때마다 아래 **문서 리비전**을 올리고 변경 요약을 적어 주세요.
 
 | 항목 | 값 |
 |------|-----|
-| 문서 리비전 | `2026-04-17b` |
-| 공개 URL (프로덕션) | 통합 명세: `/api/docs` · `/api/docs/api.md` — FE 요청 원문: `/api/docs/api_rev_260417a.md` (호스트 `https://empecs.lunarsystem.co.kr`) |
+| 문서 리비전 | `2026-05-11` |
+| 공개 URL (프로덕션) | 통합 명세: `/api/docs` · `/api/docs/api.md` — FE 협의 메모: `/api/docs/api_rev_260504.md` — EQ 상세: `/api/docs/api_rev_260417a.md` (호스트 `https://empecs.lunarsystem.co.kr` 또는 동일 스택의 `/api` 프록시) |
 | 구현 기준 | `src/index.js`, `src/routes/*.js`, `src/lib/eqNormalize.js` |
-| FE 요청 원문 | [api_rev_260417a.md](./api_rev_260417a.md) (EQ `resolve` + `bleMac`) |
+| FE 협의 메모 | [api_rev_260504.md](./api_rev_260504.md) (혈당·EQ·인증 UX·에러 본문) |
+| FE 요청 원문 (EQ) | [api_rev_260417a.md](./api_rev_260417a.md) (`resolve` + `bleMac`) |
 | 소셜 로그인 설정 | [social_login_setup_guide.md](./social_login_setup_guide.md) |
 
 FE에서는 위 URL로 `fetch` 하거나 링크하면 됩니다. 응답 `Content-Type`은 `text/markdown; charset=utf-8` 입니다.
@@ -62,6 +63,7 @@ Authorization: Bearer <access_token>
 | GET | `/api/docs` | 불필요 (본 문서 Markdown) |
 | GET | `/api/docs/api.md` | 불필요 (동일 본문) |
 | GET | `/api/docs/api_rev_260417a.md` | 불필요 (EQ resolve FE 요청 원문) |
+| GET | `/api/docs/api_rev_260504.md` | 불필요 (FE 협의 메모: 혈당·EQ·인증) |
 | POST | `/api/auth/register` | 불필요 |
 | POST | `/api/auth/login` | 불필요 |
 | GET | `/api/auth/google/callback` | 불필요 (브라우저 리다이렉트) |
@@ -71,6 +73,7 @@ Authorization: Bearer <access_token>
 | GET | `/api/data/glucose` | Bearer |
 | POST | `/api/data/glucose` | Bearer |
 | POST | `/api/data/glucose/batch` | Bearer |
+| POST | `/api/data/events/batch` | Bearer |
 | DELETE | `/api/data/glucose/clear` | Bearer (개발용) |
 | POST | `/api/data/glucose/seed-day` | Bearer (개발용) |
 | POST | `/api/data/glucose/seed-days` | Bearer (개발용) |
@@ -94,6 +97,9 @@ Authorization: Bearer <access_token>
 | POST | `/api/admin/login` | 불필요 (관리자 패널) |
 | GET | `/api/admin/stats` | 관리자 JWT |
 | GET | `/api/admin/users` | 관리자 JWT |
+| GET | `/api/admin/users/:id` | 관리자 JWT |
+| PATCH | `/api/admin/users/:id` | 관리자 JWT |
+| POST | `/api/admin/users/:id/password` | 관리자 JWT |
 | GET | `/api/admin/devices` | 관리자 JWT |
 | GET | `/api/admin/data` | 관리자 JWT |
 
@@ -122,6 +128,24 @@ Authorization: Bearer <access_token>
 
 공통 **Query**: `user`(이메일·이름 부분 일치), `sn`(시리얼 / EQ S/N), `mac`(BLE MAC, 콜론 유무 무관), `from`·`to`(ISO 날짜 `YYYY-MM-DD`, 각각 생성일 또는 측정 시각 구간), `page`, `limit`(최대 200).
 
+**`GET /api/admin/data`** 에만 **`userId`**(Mongo ObjectId 문자열): 지정 시 해당 사용자만 조회(`user` 텍스트 검색과 동시 사용하지 않음). 관리자 화면에서 특정 회원의 혈당만 볼 때 사용.
+
+### `GET /api/admin/users/:id`
+
+**응답 200**: 회원 한 명의 편집 가능 필드(비밀번호 해시 제외). `hasPassword`, `provider`, `providerId`, `createdAt`, `updatedAt` 포함.
+
+### `PATCH /api/admin/users/:id`
+
+**Body**(일부만 보내도 됨): `email`, `firstName`, `lastName`, `name`, `dateOfBirth`, `gender`, `unit`(`mg/dL`|`mmol`), `countryCode`, `language`, `provider`(null 또는 `google`|`kakao`|`apple`), `providerId`.  
+`email` 변경 시 다른 사용자와 중복이면 **409** `{ "error": "email_taken" }`.
+
+### `POST /api/admin/users/:id/password`
+
+관리자가 **기존 비밀번호 없이** 새 비밀번호를 설정합니다.
+
+**Body**: `{ "password": "<8자 이상>" }`  
+**400**: `{ "error": "password_min_8" }` 등.
+
 ---
 
 ## 1. 시스템
@@ -133,6 +157,8 @@ Authorization: Bearer <access_token>
 **응답 200**: `Content-Type: text/markdown; charset=utf-8`, 본 저장소 `docs/api.md`와 동일 본문.
 
 **`GET /api/docs/api_rev_260417a.md`**: EQ `resolve` / `bleMac` FE 요청 원문 Markdown.
+
+**`GET /api/docs/api_rev_260504.md`**: 앱(FE) 기준 협의 메모(혈당 GET 에러 본문, EQ 업서트 멱등, register 409 등).
 
 **응답 404**: 배포 이미지에 해당 파일이 없을 때 `text/plain` 메시지.
 
@@ -196,7 +222,7 @@ Authorization: Bearer <access_token>
 
 - `400` `invalid_email`, `password_too_short`
 - `422` `validation_failed` + `fields: string[]`
-- `409` `email_exists`
+- `409` `email_exists` + `message` (예: `"This email is already registered"`, [api_rev_260504.md](./api_rev_260504.md))
 - `500` `internal_error`
 
 ---
@@ -327,7 +353,7 @@ Kakao OAuth 코드 콜백. 리다이렉트 규칙은 Google과 동일 (`/auth/ca
 |----------|------|
 | `from`, `to` | ISO 날짜 문자열 → `time` 범위 (`$gte` / `$lte`). `fromTrid` 미사용 시 적용. |
 | `fromTrid` | 설정 시 `trid > fromTrid` 조건으로 조회, 정렬 `trid` 오름차순. |
-| `limit` | 기본 `2000` |
+| `limit` | 기본 `2000`, 서버에서 **1~20000** 으로 클램프 |
 | `compact` | `1` 또는 `true` 이면 압축 배열 응답 |
 | `eqsn` | 해당 시리얼만 |
 
@@ -357,6 +383,16 @@ Kakao OAuth 코드 콜백. 리다이렉트 규칙은 Google과 동일 (`/auth/ca
 
 - `t`: 시각(ms), `v`: 값, `tr`: 트랜잭션 id (없으면 `null`)
 
+**오류 (비-200)**
+
+| 상태 | 본문 예시 | 설명 |
+|------|-----------|------|
+| **400** | `{ "error": "invalid_query", "message": "Invalid from date" }` | `from` / `to` 가 파싱 불가능한 값 |
+| **401** | `{ "error": "no_token" \| "invalid_token", "message": "…" }` | Bearer 없음·JWT 무효/만료 |
+| **500** | `{ "error": "internal_error", "message": "Failed to load glucose data" }` | DB 등 서버 예외 (로그에 상세) |
+
+기간 내 데이터가 없으면 **200** + 빈 배열(또는 `compact` 시 빈 `t`/`v`/`tr`) — [api_rev_260504.md](./api_rev_260504.md) 와 동일.
+
 ---
 
 ### `POST /api/data/glucose`
@@ -378,7 +414,10 @@ Kakao OAuth 코드 콜백. 리다이렉트 규칙은 Google과 동일 (`/auth/ca
 
 ### `POST /api/data/glucose/batch`
 
-대량 삽입.
+대량 반영(업서트). 앱 오프라인 복귀 시 연속 호출·재전송에 대비해 **멱등**하게 동작합니다.
+
+- **한 요청 최대 500포인트**. 초과 시 **400** `{ "ok": false, "error": "batch_too_large", "message": "...", "count": N }`
+- **키 규칙**: 행에 `trid`(숫자)가 있으면 `(userId, trid)` 기준으로 업서트. 없으면 `(userId, time, eqsn)` 기준(`eqsn` 없음은 저장 시 필드 생략·필터는 null 규칙으로 매칭).
 
 **Body — 방식 A**: `records` 배열
 
@@ -402,16 +441,19 @@ Kakao OAuth 코드 콜백. 리다이렉트 규칙은 Google과 동일 (`/auth/ca
 }
 ```
 
-- `tr` 생략 시 해당 인덱스는 `trid` 없이 저장.
+- `tr` 생략 시 해당 인덱스는 `trid` 없이 저장(업서트 키는 `time`+`eqsn`).
 
 **응답 200**
 
 ```json
-{ "ok": true, "count": <number> }
+{ "ok": true, "count": <요청 행 수>, "upserted": <n>, "modified": <n>, "matched": <n> }
 ```
 
-- 레코드가 비어 있으면 `400` `{ "ok": false, "error": "empty" }`
-- 일부 예외 상황에서는 구현상 `catch` 후 `{ "ok": true, "count": 0 }` 이 될 수 있음 (중복 `trid` 등 insertMany 실패 시).
+- 레코드가 비어 있으면 **400** `{ "ok": false, "error": "empty", "message": "..." }`
+- `time`/`value`가 잘못된 행이 있으면 **400** `{ "ok": false, "error": "invalid_rows", "details": [...] }`
+- 서버 오류 시 **500** `{ "ok": false, "error": "batch_failed", "message": "..." }`
+
+**관측**: 동기화 구간에서 서버 콘솔에 `[sync] POST /data/glucose/batch userId=... durationMs=... { rows, upserted, modified, matched }` 로그가 남습니다.
 
 ---
 
@@ -482,7 +524,34 @@ Kakao OAuth 코드 콜백. 리다이렉트 규칙은 Google과 동일 (`/auth/ca
 | `memo` | string (optional) |
 | `eqsn` | string (optional) |
 
-**응답 200**: 생성 문서. **400** `{ "error": "invalid_event" }`
+**응답 200**: 생성 문서. **400** `{ "error": "invalid_event", "message": "..." }`
+
+---
+
+### `POST /api/data/events/batch`
+
+오프라인 적재 후 온라인 복귀 시 **HTTP 왕복을 줄이기 위한 배치 업로드**. 기존 단건 `POST /api/data/events`와 동일 필드·enum을 배열로 보냅니다.
+
+**Body**
+
+```json
+{
+  "events": [
+    { "type": "meal", "time": "2026-01-01T12:00:00.000Z", "memo": "...", "eqsn": "ABC123" }
+  ]
+}
+```
+
+- `events` 대신 **`items`** 키도 동일 형식으로 허용.
+- **한 요청 최대 200건**. 초과 시 **400** `{ "ok": false, "error": "batch_too_large", ... }`
+- 요청 전체에 대해 **type·time 사전 검증** 후 삽입합니다. 하나라도 잘못되면 **400** `{ "ok": false, "error": "invalid_events", "details": [{ "index", "error" }, ...] }` (전부 거절).
+- 스키마 검증 실패 시 **400** `{ "ok": false, "error": "invalid_event", "message": "..." }`
+
+**응답 200**: `{ "ok": true, "count": <삽입 건수>, "items": [ ...문서 ] }`
+
+**정책**: 배치는 **단건 연속 POST와 동일하게 전부 성공 시에만 200**으로 보는 편이 클라이언트 재시도 모델과 맞습니다. 위 검증·삽입 단계에서 실패하면 모두 400입니다.
+
+**관측**: `[sync] POST /data/events/batch userId=... durationMs=... { count }`
 
 ---
 
@@ -494,9 +563,7 @@ Kakao OAuth 코드 콜백. 리다이렉트 규칙은 Google과 동일 (`/auth/ca
 
 ### `DELETE /api/data/events/:id`
 
-Mongo `_id` 기준 삭제 (본인 `userId` 일치 시).
-
-**응답 200** `{ "ok": true }` / 실패 시 **400** `{ "ok": false }`
+Mongo ObjectId 문자열(`24` hex) 기준 삭제 시도. **멱등**: 해당 사용자에게 문서가 없거나 이미 삭제된 경우에도 **200** `{ "ok": true }` (앱 outbox·재시도 정리용). 잘못된 id 형식은 **400** `{ "error": "invalid_id", "message": "..." }`.
 
 ---
 
@@ -538,9 +605,13 @@ Mongo `_id` 기준 삭제 (본인 `userId` 일치 시).
 
 ### `GET /api/settings/app`
 
+앱 **온라인 헬스체크**에도 사용됩니다. DB에서는 `userId` 인덱스로 단건 조회·lean·필드 제한만 수행합니다. 통상 **수백 ms ~ 1~2s 이내**가 목표이며, 1.5s 초과 시 서버에 경고 로그를 남깁니다.
+
 문서 없으면 **빈 객체 `{}`** 반환.
 
 스키마 기본값 참고: `unit` (`mg/dL` | `mmol/L`), `notifications`, `darkMode`, `preferences` (객체)
+
+**HTTP**: 인증 실패 시 **401** `{ "error": "no_token" | "invalid_token", "message": "..." }` (앱은 비200을 오프라인으로 분류할 수 있음).
 
 ---
 
@@ -627,9 +698,9 @@ Mongo `_id` 기준 삭제 (본인 `userId` 일치 시).
 | `startAt` | 생략 시 `new Date()` |
 | `bleMac` | 선택. 알면 전달 권장(재설치 후 MAC만으로 복구). 형식 오류 시 400 |
 
-**동작**: `serial` 대문자로 upsert. `userId`·`updatedBy` 갱신. 신규 시 `startAt`, `createdBy` 설정. `bleMac` 을 보낸 경우에만 해당 필드 갱신(다른 필드 유지).
+**동작**: `serial` 대문자로 upsert. 매 요청마다 **`startAt`**(생략 시 현재 시각)·`userId`·`updatedBy` 를 갱신해 **동일 serial 반복 POST 멱등**(중복 에러 없음, [api_rev_260504.md](./api_rev_260504.md)). 신규 행에는 `createdBy` 가 `$setOnInsert` 로만 설정. `bleMac` 을 보낸 경우에만 해당 필드 갱신(미전송 시 기존 MAC 유지).
 
-**오류**: **400** `invalid_serial` | `invalid_bleMac` | `eq_upsert_failed` · **409** `bleMac_conflict` (다른 시리얼 행이 이미 같은 `bleMac` 사용)
+**오류**: **400** `invalid_serial` \| `invalid_startAt` \| `invalid_bleMac` \| `eq_upsert_failed` (각 `message` 문자열 포함 가능) · **403** `forbidden` (이미 **다른 계정**이 소유한 `serial`) · **409** `bleMac_conflict` (다른 시리얼 행이 이미 같은 `bleMac` 사용)
 
 ---
 
@@ -644,6 +715,7 @@ Mongo `_id` 기준 삭제 (본인 `userId` 일치 시).
 
 | 리비전 | 변경 요약 |
 |--------|-----------|
+| `2026-05-04` | [api_rev_260504.md](./api_rev_260504.md) 반영: `GET /api/docs/api_rev_260504.md` 서빙, `GET /api/data/glucose` JSON 오류·날짜 검증·`limit` 클램프, `POST /eq-list` 매번 `startAt` 갱신·타인 `serial` 403·409 `message`, register `email_exists` 에 `message` |
 | `2026-04-17a` | `GET /api/settings/eq-list/resolve`, Eq `bleMac`/`userId`, `POST /eq-list` 에 `bleMac` ([api_rev_260417a.md](./api_rev_260417a.md)) |
 | `2026-04-17` | `GET /api/docs`, `GET /api/docs/api.md` 로 본 문서 공개 서빙 (nginx `/api/` → BE) |
 | `2026-04-17` | 최초 정리: `auth`, `data`, `settings`, `health` 전 엔드포인트 |

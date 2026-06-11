@@ -41,6 +41,28 @@ function normalizeMac(raw) {
   return raw.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
 }
 
+function serializeUserDoc(r) {
+  if (!r) return null;
+  const u = r.toObject ? r.toObject() : r;
+  return {
+    id: u._id.toString(),
+    email: u.email,
+    firstName: u.firstName || '',
+    lastName: u.lastName || '',
+    name: u.name || '',
+    dateOfBirth: u.dateOfBirth || '',
+    gender: u.gender || '',
+    unit: u.unit || 'mg/dL',
+    countryCode: u.countryCode || '',
+    language: u.language || '',
+    provider: u.provider || null,
+    providerId: u.providerId || '',
+    hasPassword: !!u.passwordHash,
+    createdAt: u.createdAt,
+    updatedAt: u.updatedAt,
+  };
+}
+
 router.post('/login', (req, res) => {
   const { username, password } = req.body || {};
   const c = adminCreds();
@@ -123,6 +145,89 @@ router.get('/stats', requireAdmin, async (req, res) => {
     });
   } catch (e) {
     console.error('[admin/stats]', e);
+    return res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+router.get('/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ error: 'invalid_id' });
+    const u = await User.findById(id).lean();
+    if (!u) return res.status(404).json({ error: 'not_found' });
+    return res.json(serializeUserDoc(u));
+  } catch (e) {
+    console.error('[admin/users/:id GET]', e);
+    return res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+router.patch('/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ error: 'invalid_id' });
+    const u = await User.findById(id);
+    if (!u) return res.status(404).json({ error: 'not_found' });
+    const body = req.body || {};
+
+    if (body.email !== undefined) {
+      const next = String(body.email).trim().toLowerCase();
+      if (!next) return res.status(400).json({ error: 'email_required' });
+      const dup = await User.findOne({ email: next, _id: { $ne: u._id } }).select('_id').lean();
+      if (dup) return res.status(409).json({ error: 'email_taken' });
+      u.email = next;
+    }
+    const optStr = (k) => {
+      if (body[k] === undefined) return;
+      u[k] = body[k] === null || body[k] === '' ? '' : String(body[k]);
+    };
+    optStr('firstName');
+    optStr('lastName');
+    optStr('name');
+    optStr('dateOfBirth');
+    optStr('gender');
+    optStr('countryCode');
+    optStr('language');
+    if (body.unit !== undefined) {
+      const unit = String(body.unit);
+      if (unit === 'mg/dL' || unit === 'mmol') u.unit = unit;
+      else return res.status(400).json({ error: 'invalid_unit' });
+    }
+    if (body.providerId !== undefined) {
+      u.providerId = body.providerId === null || body.providerId === '' ? undefined : String(body.providerId);
+    }
+    if (body.provider !== undefined) {
+      const p = body.provider;
+      if (p === null || p === '') u.provider = null;
+      else if (['google', 'kakao', 'apple'].includes(String(p))) u.provider = String(p);
+      else return res.status(400).json({ error: 'invalid_provider' });
+    }
+
+    await u.save();
+    const fresh = await User.findById(u._id).lean();
+    return res.json({ ok: true, user: serializeUserDoc(fresh) });
+  } catch (e) {
+    console.error('[admin/users/:id PATCH]', e);
+    return res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+/** 관리자 전용: 기존 비밀번호 없이 새 비밀번호 설정(로컬·소셜 계정 모두 가능) */
+router.post('/users/:id/password', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ error: 'invalid_id' });
+    const password = req.body?.password;
+    if (!password || typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({ error: 'password_min_8' });
+    }
+    const u = await User.findById(id);
+    if (!u) return res.status(404).json({ error: 'not_found' });
+    u.passwordHash = await User.hashPassword(password);
+    await u.save();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('[admin/users/:id/password]', e);
     return res.status(500).json({ error: 'internal_error' });
   }
 });
@@ -241,7 +346,7 @@ router.get('/devices', requireAdmin, async (req, res) => {
 
 router.get('/data', requireAdmin, async (req, res) => {
   try {
-    const { user, sn, mac, page = '1', limit = '50' } = req.query;
+    const { user, sn, mac, page = '1', limit = '50', userId: userIdParam } = req.query;
     const period = parsePeriod(req);
     const q = {};
     if (period) q.time = period;
@@ -260,7 +365,17 @@ router.get('/data', requireAdmin, async (req, res) => {
       }
     }
 
-    if (user && String(user).trim()) {
+    const directUserId =
+      userIdParam && mongoose.Types.ObjectId.isValid(String(userIdParam))
+        ? new mongoose.Types.ObjectId(String(userIdParam))
+        : null;
+
+    if (directUserId) {
+      q.userId = directUserId;
+      if (userIdsFromMac && !userIdsFromMac.includes(directUserId.toString())) {
+        return res.json({ items: [], total: 0, page: Number(page), limit: Number(limit) });
+      }
+    } else if (user && String(user).trim()) {
       const re = new RegExp(escapeRegex(String(user).trim()), 'i');
       const users = await User.find({ $or: [{ email: re }, { firstName: re }, { lastName: re }, { name: re }] })
         .select('_id')

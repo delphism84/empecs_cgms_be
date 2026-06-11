@@ -110,6 +110,7 @@ function sendMarkdownDoc(relName) {
 app.get('/api/docs', sendMarkdownDoc('api.md'));
 app.get('/api/docs/api.md', sendMarkdownDoc('api.md'));
 app.get('/api/docs/api_rev_260417a.md', sendMarkdownDoc('api_rev_260417a.md'));
+app.get('/api/docs/api_rev_260504.md', sendMarkdownDoc('api_rev_260504.md'));
 
 // 소셜 로그인 테스트 페이지
 const logintestPath = path.join(publicDir, 'logintest.html');
@@ -128,6 +129,12 @@ if (fs.existsSync(redirectPath)) {
 
 async function main() {
   await connectMongo();
+  const { default: UserModel } = await import('./models/User.js');
+  try {
+    await UserModel.syncIndexes();
+  } catch (e) {
+    console.warn('[mongo] syncIndexes(users):', e?.message || e);
+  }
   await seedDefaultUser();
   app.listen(config.port, config.host, () => console.log(`[server] listening on ${config.host}:${config.port}`));
 }

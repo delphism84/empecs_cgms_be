@@ -2,11 +2,15 @@
 /**
  * EMPECS CGMS BE - QA Bot
  * API 테스트: health, auth/login, auth/social, data, settings 엔드포인트
- * 사용: node scripts/qa-bot.js [BASE_URL]
- * 기본: http://127.0.0.1:40100 (docker) / http://127.0.0.1:58002 (로컬) / http://127.0.0.1:63101 (프로덕션)
+ * 사용: node scripts/qa-bot.js [BASE_URL] [--admin]
+ *   --admin: 동일 BASE로 /api/admin/login → stats·users·devices·data 조회 (Admin Next 프록시 검증용, 예: :63103)
+ * 관리자 비번: QA_ADMIN_USERNAME / QA_ADMIN_PASSWORD (기본 admin / Empecs!@34 — docker-compose 와 동일)
+ * 기본 BASE: http://127.0.0.1:40100 (docker) / http://127.0.0.1:63101 (BE 직접)
  */
 
-const BASE = process.argv[2] || 'http://127.0.0.1:40100';
+const argv = process.argv.slice(2);
+const adminMode = argv.includes('--admin');
+const BASE = (argv.find((a) => !a.startsWith('--')) || 'http://127.0.0.1:40100').replace(/\/$/, '');
 const CRED = { email: 'empecs', password: 'admin' };
 
 async function req(method, path, body, token) {
@@ -16,7 +20,7 @@ async function req(method, path, body, token) {
     headers: { 'Content-Type': 'application/json' },
   };
   if (token) opts.headers.Authorization = `Bearer ${token}`;
-  if (body && (method === 'POST' || method === 'PUT')) opts.body = JSON.stringify(body);
+  if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) opts.body = JSON.stringify(body);
   const res = await fetch(url, opts);
   const text = await res.text();
   let json;
@@ -98,6 +102,44 @@ async function main() {
   ok('POST /api/auth/social/verify (no provider)', verifyNoProvider);
   const verifyBadPayload = await req('POST', '/api/auth/social/verify', { provider: 'google' });
   ok('POST /api/auth/social/verify (google, no idToken)', verifyBadPayload);
+
+  if (adminMode) {
+    const adminUser = process.env.QA_ADMIN_USERNAME || 'admin';
+    const adminPass = process.env.QA_ADMIN_PASSWORD || 'Empecs!@34';
+    console.log('\n--- Admin API (docs/api.md /api/admin, same BASE) ---');
+    const adminLogin = await req('POST', '/api/admin/login', { username: adminUser, password: adminPass });
+    ok('POST /api/admin/login', adminLogin);
+    if (!adminLogin.ok || !adminLogin.data?.token) {
+      console.log('\n관리자 로그인 실패. BE ADMIN_USERNAME/ADMIN_PASSWORD 또는 QA_ADMIN_* 확인.');
+      process.exit(1);
+    }
+    const adm = adminLogin.data.token;
+    const stats = await req('GET', '/api/admin/stats', null, adm);
+    ok('GET /api/admin/stats', stats);
+    const users = await req('GET', '/api/admin/users?page=1&limit=5', null, adm);
+    ok('GET /api/admin/users', users);
+    const devices = await req('GET', '/api/admin/devices?page=1&limit=5', null, adm);
+    ok('GET /api/admin/devices', devices);
+    const data = await req('GET', '/api/admin/data?page=1&limit=5', null, adm);
+    ok('GET /api/admin/data', data);
+
+    const firstId = users.data?.items?.[0]?.id;
+    if (firstId) {
+      const detail = await req('GET', `/api/admin/users/${firstId}`, null, adm);
+      ok('GET /api/admin/users/:id', detail);
+      const nm = typeof detail.data?.name === 'string' ? detail.data.name : '';
+      const patch = await req('PATCH', `/api/admin/users/${firstId}`, { name: nm || 'QA' }, adm);
+      ok('PATCH /api/admin/users/:id', patch);
+      const today = new Date().toISOString().slice(0, 10);
+      const dataByUser = await req(
+        'GET',
+        `/api/admin/data?userId=${encodeURIComponent(firstId)}&from=${today}&to=${today}&page=1&limit=5`,
+        null,
+        adm
+      );
+      ok('GET /api/admin/data?userId=&from=&to=', dataByUser);
+    }
+  }
 
   console.log('\n=== QA 완료 ===\n');
 }

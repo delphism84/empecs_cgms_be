@@ -60,7 +60,13 @@ router.post('/register', async (req, res) => {
     }
 
     const exists = await User.findOne({ email: email.trim().toLowerCase() }).lean();
-    if (exists) return res.status(409).json({ ok: false, error: 'email_exists' });
+    if (exists) {
+      return res.status(409).json({
+        ok: false,
+        error: 'email_exists',
+        message: 'This email is already registered',
+      });
+    }
 
     const passwordHash = await User.hashPassword(password);
     const user = await User.create({

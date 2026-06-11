@@ -1,8 +1,8 @@
 # EMPECS CGMS — Mongo + BE + Admin FE
-# 이 디렉터리에서: docker compose up -d --build
+# 경로: empecs/cgms/cgms_be — 이 디렉터리에서: docker compose up -d --build
 # DB 초기화(데이터 삭제): docker compose down && rm -rf ./data/mongo && docker compose up -d
 #
-# 호스트 포트(nginx / 기존 앱과 동일): Mongo 47011 · BE 63101 · Admin FE 63103
+# 호스트 포트: Mongo 47011(외부 허용 시 0.0.0.0 바인딩 + UFW) · BE 63101 · Admin FE 63103 · 사용자 Flutter Web(QA) 63104
 
 services:
   mongo:
@@ -16,7 +16,8 @@ services:
       - ./data/mongo:/data/db
     command: ["mongod", "--bind_ip_all", "--auth"]
     ports:
-      - "127.0.0.1:47011:27017"
+      # localhost 전용일 때만: "127.0.0.1:47011:27017" — 외부 클라이언트 허용 시 아래처럼 전체 인터페이스
+      - "0.0.0.0:47011:27017"
 
   be:
     build: .
@@ -27,6 +28,8 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: "58002"
+      # OAuth 콜백·리다이렉트 (auth.js)
+      BASE_URL: "https://empecs.lunarsystem.co.kr"
       JWT_SECRET: "${JWT_SECRET:-change-me}"
       MONGO_URI: "mongodb://admin:Empecs%21%4034@mongo:27017/empecs_cgms?authSource=admin"
       MONGO_DB: "empecs_cgms"
@@ -39,7 +42,7 @@ services:
 
   fe:
     build:
-      context: ../empecs/cgms/cgms_admin_fe
+      context: ../cgms_admin_fe
       dockerfile: Dockerfile
       args:
         # FE 컨테이너가 직접 :63103 으로 열릴 때 /api 를 같은 스택의 BE 로 넘김 (nginx 경유 배포는 여전히 nginx가 /api 분기)
@@ -54,4 +57,16 @@ services:
       NEXT_PUBLIC_API_BASE_URL: ""
     ports:
       - "127.0.0.1:63103:3000"
+
+  # CGMS 사용자 앱 Flutter Web (BLE 제외 QA) — https://empecsuser.lunarsystem.co.kr (호스트 nginx → 63104)
+  cgms-app-fe:
+    build:
+      context: ../cgms_app_fe
+      dockerfile: Dockerfile
+    container_name: empecs-cgms-app-fe
+    restart: unless-stopped
+    depends_on:
+      - be
+    ports:
+      - "127.0.0.1:63104:80"
 

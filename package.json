@@ -7,7 +7,12 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "qa": "node scripts/qa-bot.js",
-    "qa:local": "node scripts/qa-bot.js http://127.0.0.1:63101"
+    "qa:local": "node scripts/qa-bot.js http://127.0.0.1:63101",
+    "qa:admin": "node scripts/qa-bot.js http://127.0.0.1:63103 --admin",
+    "qa:e2e": "node scripts/qa-e2e-full.js",
+    "qa:e2e:local": "node scripts/qa-e2e-full.js http://127.0.0.1:63101",
+    "qa:e2e:empecsuser": "node scripts/qa-e2e-full.js https://empecsuser.lunarsystem.co.kr",
+    "qa:e2e:prod": "node scripts/qa-e2e-full.js https://empecs.lunarsystem.co.kr"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

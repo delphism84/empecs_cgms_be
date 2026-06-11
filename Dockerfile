@@ -7,7 +7,7 @@ RUN npm ci --omit=dev
 
 COPY src ./src
 COPY public ./public
-COPY docs/api.md docs/api_rev_260417a.md ./docs/
+COPY docs/api.md docs/api_rev_260417a.md docs/api_rev_260504.md ./docs/
 COPY config.example.json ./config.example.json
 
 ENV NODE_ENV=production

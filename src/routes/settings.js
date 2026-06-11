@@ -12,13 +12,15 @@ const router = express.Router();
 function auth(req, res, next) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
-  if (!token) return res.status(401).json({ error: 'no_token' });
+  if (!token) {
+    return res.status(401).json({ error: 'no_token', message: 'Authorization Bearer token required' });
+  }
   try {
     const payload = jwt.verify(token, config.jwtSecret);
     req.userId = payload.sub;
     next();
   } catch (_) {
-    return res.status(401).json({ error: 'invalid_token' });
+    return res.status(401).json({ error: 'invalid_token', message: 'JWT invalid or expired' });
   }
 }
 
@@ -81,8 +83,16 @@ router.delete('/alarms/:id', auth, async (req, res) => {
 });
 
 // app settings (single doc per user)
+// Lightweight path for FE online probe: indexed userId, lean projection only (no hydration overhead).
 router.get('/app', auth, async (req, res) => {
-  const s = await AppSetting.findOne({ userId: req.userId });
+  const started = Date.now();
+  const s = await AppSetting.findOne({ userId: req.userId })
+    .select('userId unit notifications darkMode preferences updatedAt createdAt')
+    .lean();
+  const ms = Date.now() - started;
+  if (ms > 1500) {
+    console.warn('[GET /settings/app] slow', { userId: req.userId, durationMs: ms });
+  }
   return res.json(s || {});
 });
 router.put('/app', auth, async (req, res) => {
@@ -136,7 +146,9 @@ router.get('/eq-list/resolve', auth, async (req, res) => {
     if (serialCand) chosen = serialCand;
   }
 
-  if (!chosen) return res.status(404).json({ error: 'not_found' });
+  if (!chosen) {
+    return res.status(404).json({ error: 'not_found', message: 'No owned EQ row for this serial or bleMac' });
+  }
 
   const doc = chosen.doc;
   const EQ_VALIDITY_DAYS = Math.max(1, Math.min(90, Number(process.env.EQ_VALIDITY_DAYS || 14)));
@@ -164,25 +176,42 @@ router.post('/eq-list', auth, async (req, res) => {
   try {
     const { serial, startAt, bleMac: bleMacRaw } = req.body || {};
     if (!serial || typeof serial !== 'string' || serial.trim().length === 0) {
-      return res.status(400).json({ error: 'invalid_serial' });
+      return res.status(400).json({ error: 'invalid_serial', message: 'serial is required' });
     }
     const sn = serial.toUpperCase().trim();
     const start = startAt ? new Date(startAt) : new Date();
+    if (Number.isNaN(start.getTime())) {
+      return res.status(400).json({ error: 'invalid_startAt', message: 'startAt is not a valid date' });
+    }
     const macNorm = bleMacRaw != null && String(bleMacRaw).trim() !== '' ? normalizeBleMac(bleMacRaw) : null;
     if (bleMacRaw != null && String(bleMacRaw).trim() !== '' && !macNorm) {
-      return res.status(400).json({ error: 'invalid_bleMac' });
+      return res.status(400).json({ error: 'invalid_bleMac', message: 'bleMac format is invalid' });
     }
-    const set = { updatedBy: req.userId, userId: req.userId };
+
+    const existing = await Eq.findOne({ serial: sn }).lean();
+    if (existing && !userOwnsEq(existing, req.userId)) {
+      return res.status(403).json({
+        error: 'forbidden',
+        message: 'This serial is registered to another account',
+      });
+    }
+
+    const set = { startAt: start, updatedBy: req.userId, userId: req.userId };
     if (macNorm) set.bleMac = macNorm;
     const updated = await Eq.findOneAndUpdate(
       { serial: sn },
-      { $setOnInsert: { startAt: start, createdBy: req.userId }, $set: set },
+      { $set: set, $setOnInsert: { createdBy: req.userId } },
       { new: true, upsert: true }
     );
     return res.json(updated);
   } catch (e) {
-    if (e && e.code === 11000) return res.status(409).json({ error: 'bleMac_conflict' });
-    return res.status(400).json({ error: 'eq_upsert_failed' });
+    if (e && e.code === 11000) {
+      return res.status(409).json({
+        error: 'bleMac_conflict',
+        message: 'Another EQ row already uses this bleMac',
+      });
+    }
+    return res.status(400).json({ error: 'eq_upsert_failed', message: 'EQ upsert failed' });
   }
 });
 
