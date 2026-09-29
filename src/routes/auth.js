@@ -1,5 +1,6 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
 import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { config } from '../config.js';
@@ -13,7 +14,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function sign(user) {
-  return jwt.sign({ sub: user._id.toString(), email: user.email }, config.jwtSecret, { expiresIn: '7d' });
+  return jwt.sign({ sub: user._id.toString(), email: user.email }, config.jwtSecret, { expiresIn: config.jwtExpiresIn });
 }
 
 function toUserId(id) {
@@ -331,6 +332,34 @@ router.get('/me', async (req, res) => {
     res.json({ ok: true, user: { ...safe, id: toUserId(safe._id) } });
   } catch (_) {
     return res.status(401).json({ error: 'invalid_token' });
+  }
+});
+
+// POST /api/auth/refresh — 만료 전 토큰을 새 토큰으로 교체(슬라이딩 세션).
+// 앱은 토큰 발급 후 24시간이 지나면 호출한다. 만료·위조·삭제된 사용자는 401 → 앱이 재로그인 안내.
+router.post('/refresh', async (req, res) => {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (!token) return res.status(401).json({ ok: false, error: 'no_token', message: 'Authorization Bearer token required' });
+  let payload;
+  try {
+    payload = jwt.verify(token, config.jwtSecret);
+  } catch (_) {
+    return res.status(401).json({ ok: false, error: 'invalid_token', message: 'JWT invalid or expired' });
+  }
+  // 관리자 토큰(sub='admin') 등 사용자 토큰이 아닌 것은 갱신 대상이 아니다.
+  if (!payload?.sub || !mongoose.isValidObjectId(payload.sub)) {
+    return res.status(401).json({ ok: false, error: 'invalid_token', message: 'Not a user token' });
+  }
+  try {
+    const user = await User.findById(payload.sub);
+    if (!user) return res.status(401).json({ ok: false, error: 'user_not_found' });
+    const next = sign(user);
+    const { exp } = jwt.decode(next);
+    return res.json({ ok: true, token: next, expiresAt: new Date(exp * 1000).toISOString() });
+  } catch (e) {
+    console.error('[auth] refresh error', e?.message || e);
+    return res.status(500).json({ ok: false, error: 'internal_error' });
   }
 });
 

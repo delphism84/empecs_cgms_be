@@ -51,6 +51,9 @@ export const config = {
   host: process.env.HOST || fileCfg.Host || (fileCfg.Server && fileCfg.Server.Host) || '0.0.0.0',
   port: Number(process.env.PORT || fileCfg.Port || (fileCfg.Server && fileCfg.Server.Port) || 58002),
   jwtSecret: process.env.JWT_SECRET || fileCfg.JwtSecret || 'change-me',
+  // 사용자 JWT 유효기간. 앱이 사용 중 매일 /api/auth/refresh 로 갱신하므로(슬라이딩 세션)
+  // 이 기간 동안 앱을 한 번도 쓰지 않은 경우에만 재로그인이 필요하다.
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN || fileCfg.JwtExpiresIn || '30d',
   mongo: mongoCfg,
   oauth: oauthEnv,
   baseUrl,

@@ -5,7 +5,7 @@
 
 | 항목 | 값 |
 |------|-----|
-| 문서 리비전 | `2026-05-11` |
+| 문서 리비전 | `2026-09-29` |
 | 공개 URL (프로덕션) | 통합 명세: `/api/docs` · `/api/docs/api.md` — FE 협의 메모: `/api/docs/api_rev_260504.md` — EQ 상세: `/api/docs/api_rev_260417a.md` (호스트 `https://empecs.lunarsystem.co.kr` 또는 동일 스택의 `/api` 프록시) |
 | 구현 기준 | `src/index.js`, `src/routes/*.js`, `src/lib/eqNormalize.js` |
 | FE 협의 메모 | [api_rev_260504.md](./api_rev_260504.md) (혈당·EQ·인증 UX·에러 본문) |
@@ -32,7 +32,8 @@ FE에서는 위 URL로 `fetch` 하거나 링크하면 됩니다. 응답 `Content
 Authorization: Bearer <access_token>
 ```
 
-- JWT 페이로드: `{ sub: <mongo User _id 문자열>, email }`, 만료 **7일** (`src/routes/auth.js`의 `sign()`).
+- JWT 페이로드: `{ sub: <mongo User _id 문자열>, email }`, 만료 **30일**(환경변수 `JWT_EXPIRES_IN`, 기본 `30d`; `src/routes/auth.js`의 `sign()`).
+- **슬라이딩 세션**: 앱은 토큰 발급 후 24시간이 지나면 `POST /api/auth/refresh` 로 새 토큰을 받아 교체한다. 앱을 쓰는 동안에는 로그인이 풀리지 않고, 만료 기간 내내 앱을 쓰지 않은 경우에만 재로그인이 필요하다.
 
 ### 응답 형식
 
@@ -70,6 +71,7 @@ Authorization: Bearer <access_token>
 | GET | `/api/auth/kakao/callback` | 불필요 (브라우저 리다이렉트) |
 | POST | `/api/auth/social/verify` | 불필요 |
 | GET | `/api/auth/me` | Bearer |
+| POST | `/api/auth/refresh` | Bearer (만료 전 토큰) |
 | GET | `/api/data/glucose` | Bearer |
 | POST | `/api/data/glucose` | Bearer |
 | POST | `/api/data/glucose/batch` | Bearer |
@@ -334,6 +336,26 @@ Kakao OAuth 코드 콜백. 리다이렉트 규칙은 Google과 동일 (`/auth/ca
 **오류**
 
 - `401` `no_token` | `invalid_token` | `user_not_found`
+
+### `POST /api/auth/refresh`
+
+만료 전 사용자 토큰을 새 토큰(유효기간 `JWT_EXPIRES_IN`)으로 교체한다. 본문 없음.
+
+```http
+POST /api/auth/refresh
+Authorization: Bearer <만료 전 access_token>
+```
+
+**응답 200**
+
+```json
+{ "ok": true, "token": "<새 JWT>", "expiresAt": "2026-10-29T03:38:00.000Z" }
+```
+
+**오류**
+
+- `401` `no_token` | `invalid_token`(만료·위조·사용자 토큰 아님) | `user_not_found`(삭제된 계정)
+- 앱은 401 을 받으면 해당 토큰으로 더 이상 요청하지 않고 재로그인을 안내한다(401 반복으로 인한 보안 차단 방지).
 
 ---
 
@@ -715,6 +737,7 @@ Mongo ObjectId 문자열(`24` hex) 기준 삭제 시도. **멱등**: 해당 사�
 
 | 리비전 | 변경 요약 |
 |--------|-----------|
+| `2026-09-29` | `POST /api/auth/refresh`(슬라이딩 세션) 추가, 사용자 JWT 만료 7일 → `JWT_EXPIRES_IN`(기본 30일). 배경·배포 절차: [task_260929_token_refresh.md](./task_260929_token_refresh.md) |
 | `2026-05-04` | [api_rev_260504.md](./api_rev_260504.md) 반영: `GET /api/docs/api_rev_260504.md` 서빙, `GET /api/data/glucose` JSON 오류·날짜 검증·`limit` 클램프, `POST /eq-list` 매번 `startAt` 갱신·타인 `serial` 403·409 `message`, register `email_exists` 에 `message` |
 | `2026-04-17a` | `GET /api/settings/eq-list/resolve`, Eq `bleMac`/`userId`, `POST /eq-list` 에 `bleMac` ([api_rev_260417a.md](./api_rev_260417a.md)) |
 | `2026-04-17` | `GET /api/docs`, `GET /api/docs/api.md` 로 본 문서 공개 서빙 (nginx `/api/` → BE) |
