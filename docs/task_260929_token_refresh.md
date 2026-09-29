@@ -97,3 +97,25 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST https://empecs.lunarsystem.co.k
 - 장기 세션 보강: 비밀번호 변경·관리자 강제 변경 시 기존 토큰을 무효화하려면 `User.tokenVersion` 을 두고 JWT 에 `tv` 를 넣어
   인증 미들웨어(현재 `data.js`·`settings.js`·`auth.js /me` 에 복사된 3곳)와 refresh 에서 비교. 이번 커밋에는 포함하지 않았다.
 - 서버의 미커밋 로컬 수정(2번)은 커밋해 두어야 다음 배포 때 git 기준으로 재현 가능하다.
+
+## 배포 기록 (2026-09-29, 완료)
+
+1. **04:00 UTC — 옵션 1 적용**: `auth.js`·`config.js` 를 컨테이너에 반영 후 재시작. 운영 컨테이너 안에서 QA 계정으로
+   refresh `200`(새 토큰 30일)·토큰 없음 `401`·만료 토큰 `401` 확인. 기존 파일 백업: `/root/backup/cgms_be_260929/`.
+2. **04:07 UTC — 옵션 2(전체 재빌드)로 전환**(개발 서버라 재빌드 허용). 운영이 이제 **HEAD + 서버 로컬 수정**과 일치한다.
+   - 재빌드가 안 되던 원인: `package-lock.json` 이 `package.json` 과 불일치(`gcp-metadata` 누락 + 서버에서 추가한 `ws`).
+     2026-05-03 이후 이미지를 다시 만들 수 없어 파일을 `docker cp` 로 넣어 온 것으로 보인다.
+     `node:20-alpine` 에서 `npm install --package-lock-only` 로 lock 만 재생성(주요 버전은 운영 설치본과 동일:
+     ws 8.21.1 · jsonwebtoken 9.0.3 · mongoose 8.23.0 · express 4.22.1). 이전 lock 백업: `/root/backup/cgms_be_260929/package-lock.json`.
+   - 재빌드 후 컨테이너 `src` == 서버 작업트리 확인. 컨테이너 안 점검(QA 계정): `auth/me`·`settings/app`·`data/glucose`·
+     `settings/alarms` `200`, `POST eq-list` 2회 시 `startAt` 갱신됨(HEAD 동작), `resolve` `200`, `refresh` `200`(30일),
+     관리자 `stats` `200`. 점검용 serial 은 삭제.
+3. **롤백**: 이전 이미지를 `cgms_be-be:pre260929` 로 태그해 둠.
+
+```bash
+cd /lunar/empecs/cgms/cgms_be
+docker tag cgms_be-be:pre260929 cgms_be-be:latest && docker compose up -d --no-build be
+```
+
+**남은 일(서버 소유자)**: 서버의 미커밋 수정(`src/index.js`·`src/routes/admin.js`·`src/services/`·`src/ws/`·`package.json`(ws)·
+재생성한 `package-lock.json`·nginx 설정)을 커밋해야 다음 배포를 git 으로 재현할 수 있다. 다른 사람의 작업이라 이번에 커밋하지 않았다.
