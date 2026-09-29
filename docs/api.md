@@ -439,7 +439,7 @@ Authorization: Bearer <만료 전 access_token>
 대량 반영(업서트). 앱 오프라인 복귀 시 연속 호출·재전송에 대비해 **멱등**하게 동작합니다.
 
 - **한 요청 최대 500포인트**. 초과 시 **400** `{ "ok": false, "error": "batch_too_large", "message": "...", "count": N }`
-- **키 규칙**: 행에 `trid`(숫자)가 있으면 `(userId, trid)` 기준으로 업서트. 없으면 `(userId, time, eqsn)` 기준(`eqsn` 없음은 저장 시 필드 생략·필터는 null 규칙으로 매칭).
+- **키 규칙**: 항상 `(userId, eqsn, time)` 기준으로 업서트(`eqsn` 없음은 저장 시 필드 생략·필터는 null 규칙으로 매칭). `trid` 는 값으로만 저장하고 식별에 쓰지 않는다 — 앱의 trid 는 설치별 업로드 카운터라 재설치·로그아웃·초기화 후 1 부터 다시 쓰이므로, trid 로 식별하면 과거 판독을 덮어쓴다(2026-09-29 변경).
 
 **Body — 방식 A**: `records` 배열
 
@@ -737,7 +737,7 @@ Mongo ObjectId 문자열(`24` hex) 기준 삭제 시도. **멱등**: 해당 사�
 
 | 리비전 | 변경 요약 |
 |--------|-----------|
-| `2026-09-29` | `POST /api/auth/refresh`(슬라이딩 세션) 추가, 사용자 JWT 만료 7일 → `JWT_EXPIRES_IN`(기본 30일). 배경·배포 절차: [task_260929_token_refresh.md](./task_260929_token_refresh.md) |
+| `2026-09-29` | `POST /api/data/glucose/batch` 업서트 키를 `(userId, trid)` → `(userId, eqsn, time)` 로 변경(trid 재사용 시 과거 판독 덮어쓰기 방지). `POST /api/auth/refresh`(슬라이딩 세션) 추가, 사용자 JWT 만료 7일 → `JWT_EXPIRES_IN`(기본 30일). 배경·배포 절차: [task_260929_token_refresh.md](./task_260929_token_refresh.md) |
 | `2026-05-04` | [api_rev_260504.md](./api_rev_260504.md) 반영: `GET /api/docs/api_rev_260504.md` 서빙, `GET /api/data/glucose` JSON 오류·날짜 검증·`limit` 클램프, `POST /eq-list` 매번 `startAt` 갱신·타인 `serial` 403·409 `message`, register `email_exists` 에 `message` |
 | `2026-04-17a` | `GET /api/settings/eq-list/resolve`, Eq `bleMac`/`userId`, `POST /eq-list` 에 `bleMac` ([api_rev_260417a.md](./api_rev_260417a.md)) |
 | `2026-04-17` | `GET /api/docs`, `GET /api/docs/api.md` 로 본 문서 공개 서빙 (nginx `/api/` → BE) |

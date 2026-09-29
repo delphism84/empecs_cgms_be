@@ -84,7 +84,7 @@ router.post('/glucose', auth, async (req, res) => {
   return res.json(item);
 });
 
-// batch ingest (compact arrays) — 멱등 upsert: trid 있으면 (userId+trid), 없으면 (userId+time+eqsn)
+// batch ingest (compact arrays) — 멱등 upsert: (userId+eqsn+time). trid 는 값으로만 저장(식별에 쓰지 않음)
 router.post('/glucose/batch', auth, async (req, res) => {
   const startedAt = Date.now();
   try {
@@ -153,15 +153,9 @@ router.post('/glucose/batch', auth, async (req, res) => {
       };
       if (eqsnNorm != null) setDoc.eqsn = eqsnNorm;
       if (hasTrid) setDoc.trid = Number(d.trid);
-      if (hasTrid) {
-        return {
-          updateOne: {
-            filter: { userId: uid, trid: Number(d.trid) },
-            update: { $set: setDoc },
-            upsert: true,
-          },
-        };
-      }
+      // 식별 키는 항상 (userId, eqsn, time) — 앱 로컬 DB 의 UNIQUE(eqsn, time_ms) 와 같다.
+      // trid 는 앱 설치별 업로드 카운터라 재설치·로그아웃·초기화 때 1 부터 다시 쓰인다.
+      // 예전처럼 (userId, trid) 로 upsert 하면 몇 달 전 같은 trid 의 판독을 덮어써 서버 이력이 사라진다.
       return {
         updateOne: {
           filter: { userId: uid, time: d.time, eqsn: eqsnNorm },
