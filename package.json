@@ -12,7 +12,9 @@
     "qa:e2e": "node scripts/qa-e2e-full.js",
     "qa:e2e:local": "node scripts/qa-e2e-full.js http://127.0.0.1:63101",
     "qa:e2e:empecsuser": "node scripts/qa-e2e-full.js https://empecsuser.lunarsystem.co.kr",
-    "qa:e2e:prod": "node scripts/qa-e2e-full.js https://empecs.lunarsystem.co.kr"
+    "qa:e2e:prod": "node scripts/qa-e2e-full.js https://empecs.lunarsystem.co.kr",
+    "dev:memory": "node scripts/dev-server.mjs",
+    "test:admin": "node scripts/admin-selftest.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
