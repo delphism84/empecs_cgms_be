@@ -7,8 +7,6 @@ const UserSchema = new mongoose.Schema(
     passwordHash: { type: String }, // 소셜 로그인 시 null 허용
     provider: { type: String, enum: ['google', 'kakao', 'apple', null], default: null },
     providerId: { type: String }, // sub / id (provider별 고유 ID)
-    // debug only (to be removed later)
-    passwordOrg: { type: String },
     name: { type: String },
     // req_be_account fields
     firstName: { type: String },
@@ -18,6 +16,17 @@ const UserSchema = new mongoose.Schema(
     unit: { type: String, enum: ['mg/dL', 'mmol'], default: 'mg/dL' },
     countryCode: { type: String },
     language: { type: String },
+    // 관리(어드민) 필드
+    status: { type: String, enum: ['active', 'suspended', 'deleted'], default: 'active', index: true },
+    suspendedReason: { type: String },
+    suspendedAt: { type: Date },
+    deletedAt: { type: Date },
+    /** 증가시키면 기존 토큰이 전부 무효(강제 로그아웃). JWT 의 tv 와 비교한다. */
+    tokenVersion: { type: Number, default: 0 },
+    lastLoginAt: { type: Date },
+    lastSeenAt: { type: Date },
+    lastUploadAt: { type: Date, index: true },
+    adminNote: { type: String },
   },
   { timestamps: true }
 );

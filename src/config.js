@@ -59,7 +59,8 @@ export const config = {
   baseUrl,
   admin: {
     username: process.env.ADMIN_USERNAME || adminCfg.Username || 'admin',
-    password: process.env.ADMIN_PASSWORD || adminCfg.Password || 'Empecs!@34',
+    // 기본값 없음: 값이 없으면 최초 관리자 비밀번호를 무작위로 만들어 서버 로그에 1회 출력한다(admin/auth.js).
+    password: process.env.ADMIN_PASSWORD || adminCfg.Password || '',
   },
 };
 

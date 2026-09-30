@@ -110,7 +110,7 @@ Authorization: Bearer <access_token>
 ## 관리자 API (`/api/admin`)
 
 > 웹 관리자(EMPECS CGMS Admin FE) 전용. JWT 페이로드에 `role: "admin"` 이 포함되며, 일반 사용자 JWT와 구분됩니다.  
-> 기본 계정은 `config.json`의 `Admin` 또는 환경변수 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 로 설정합니다 (기본값 `admin` / `Empecs!@34`).
+> 관리자 계정은 DB(`adminusers`)에 있습니다. 계정이 하나도 없을 때만 `ADMIN_USERNAME` / `ADMIN_PASSWORD`(환경변수 또는 `config.json`의 `Admin`)로 최초 최고관리자를 만들고, 첫 로그인 때 비밀번호 변경을 요구합니다. 코드에 기본 비밀번호는 없습니다.
 
 ### `POST /api/admin/login`
 

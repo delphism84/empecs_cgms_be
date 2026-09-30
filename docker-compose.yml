@@ -1,3 +1,5 @@
+# 비밀값(MONGO_ROOT_PASSWORD, MONGO_URI, JWT_SECRET, ADMIN_PASSWORD 등)은 이 파일에 적지 않는다.
+# 같은 폴더의 .env(커밋 금지)에서 읽는다 — .env.example 참고.
 # EMPECS CGMS — Mongo + BE + Admin FE
 # 경로: empecs/cgms/cgms_be — 이 디렉터리에서: docker compose up -d --build
 # DB 초기화(데이터 삭제): docker compose down && rm -rf ./data/mongo && docker compose up -d
@@ -11,7 +13,7 @@ services:
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: Empecs!@34
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env}"
     volumes:
       - ./data/mongo:/data/db
     command: ["mongod", "--bind_ip_all", "--auth"]
@@ -30,11 +32,11 @@ services:
       PORT: "58002"
       # OAuth 콜백·리다이렉트 (auth.js)
       BASE_URL: "https://empecs.lunarsystem.co.kr"
-      JWT_SECRET: "${JWT_SECRET:-change-me}"
-      MONGO_URI: "mongodb://admin:Empecs%21%4034@mongo:27017/empecs_cgms?authSource=admin"
+      JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in .env}"
+      MONGO_URI: "${MONGO_URI:?set MONGO_URI in .env}"
       MONGO_DB: "empecs_cgms"
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
-      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-Empecs!@34}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
     ports:
       - "127.0.0.1:63101:58002"
     volumes:

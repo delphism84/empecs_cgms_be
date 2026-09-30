@@ -1,11 +1,11 @@
 {
   "MongoDb": {
-    "ConnectionString": "mongodb://admin:Empecs%21%4034@127.0.0.1:47011/empecs_cgms?authSource=admin",
+    "ConnectionString": "mongodb://admin:CHANGE_ME@localhost:27017/empecs_cgms?authSource=admin",
     "DatabaseName": "empecs_cgms"
   },
   "Admin": {
     "Username": "admin",
-    "Password": "Empecs!@34"
+    "Password": "CHANGE_ME"
   },
   "OAuth": {
     "BaseUrl": "https://empecs.lunarsystem.co.kr",

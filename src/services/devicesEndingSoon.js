@@ -1,17 +1,19 @@
 import Eq from '../models/Eq.js';
+import { getSettings, validityMs } from '../lib/settingsStore.js';
 
-/** 앱과 동일: AppConstants.defaultSensorValidityDays = 15 */
-export const SENSOR_VALIDITY_MS = 15 * 24 * 60 * 60 * 1000;
-export const ENDING_SOON_WINDOW_MS = 24 * 60 * 60 * 1000;
+// 유효기간·임박 기준은 시스템 설정(eqValidityDays, endingSoonHours)을 따른다.
+// 예전에는 여기 15일, resolve 14일, 앱 16일로 서로 달랐다.
 
 /**
  * 종료 예정 기기 목록 (잔여 ≤ 1일, 잔여 짧은 순)
  * @param {{ now?: Date }} [opts]
  */
 export async function listDevicesEndingSoon(opts = {}) {
+  const settings = await getSettings();
+  const SENSOR_VALIDITY_MS = validityMs(settings);
+  const ENDING_SOON_WINDOW_MS = settings.endingSoonHours * 60 * 60 * 1000;
   const now = opts.now ? new Date(opts.now) : new Date();
   const nowMs = now.getTime();
-  const windowEnd = nowMs + ENDING_SOON_WINDOW_MS;
 
   // startAt 이 (now - 15d) ~ (now - 15d + 1d] 이면 종료가 1일 이내
   // endAt = startAt + 15d ∈ (now, now+1d]  ⇔  startAt ∈ (now-15d, now-15d+1d]
@@ -60,8 +62,8 @@ export async function listDevicesEndingSoon(opts = {}) {
   return {
     items,
     total: items.length,
-    validityDays: 15,
-    windowHours: 24,
+    validityDays: settings.eqValidityDays,
+    windowHours: settings.endingSoonHours,
     serverTime: now.toISOString(),
   };
 }
@@ -71,6 +73,8 @@ export async function getDeviceDetail(id) {
     .populate('userId', 'email firstName lastName name provider countryCode unit language dateOfBirth gender createdAt updatedAt')
     .lean();
   if (!r) return null;
+  const settings = await getSettings();
+  const SENSOR_VALIDITY_MS = validityMs(settings);
   const now = new Date();
   const startAt = r.startAt ? new Date(r.startAt) : null;
   const endAt = startAt ? new Date(startAt.getTime() + SENSOR_VALIDITY_MS) : null;
@@ -84,7 +88,7 @@ export async function getDeviceDetail(id) {
     endAt: endAt?.toISOString() || null,
     remainingMs,
     remainingSec: remainingMs == null ? null : Math.max(0, Math.floor(remainingMs / 1000)),
-    validityDays: 15,
+    validityDays: settings.eqValidityDays,
     user: u
       ? {
           id: u._id.toString(),

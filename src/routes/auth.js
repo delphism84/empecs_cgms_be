@@ -7,6 +7,8 @@ import { config } from '../config.js';
 import User from '../models/User.js';
 import GlucosePoint from '../models/GlucosePoint.js';
 import Event from '../models/Event.js';
+import { verifyUserToken } from '../lib/userAuth.js';
+import { logLogin } from '../admin/auth.js';
 
 const router = express.Router();
 
@@ -14,7 +16,26 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function sign(user) {
-  return jwt.sign({ sub: user._id.toString(), email: user.email }, config.jwtSecret, { expiresIn: config.jwtExpiresIn });
+  // tv: 관리자가 강제 로그아웃(tokenVersion 증가)하면 이전 토큰이 무효가 된다.
+  return jwt.sign(
+    { sub: user._id.toString(), email: user.email, tv: user.tokenVersion || 0 },
+    config.jwtSecret,
+    { expiresIn: config.jwtExpiresIn }
+  );
+}
+
+/** 로그인 성공 처리: 정지·탈퇴 계정은 막고, 로그인 기록과 마지막 로그인 시각을 남긴 뒤 토큰 발급. */
+async function issueToken(user, req, method) {
+  const status = user.status || 'active';
+  if (status !== 'active') {
+    await logLogin({ kind: 'user', subjectId: user._id, identifier: user.email, success: false, reason: `account_${status}`, method, req });
+    const err = new Error(status === 'suspended' ? 'account_suspended' : 'invalid_credentials');
+    err.accountBlocked = true;
+    throw err;
+  }
+  User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } }).catch(() => {});
+  await logLogin({ kind: 'user', subjectId: user._id, identifier: user.email, success: true, method, req });
+  return sign(user);
 }
 
 function toUserId(id) {
@@ -73,7 +94,6 @@ router.post('/register', async (req, res) => {
     const user = await User.create({
       email: email.trim().toLowerCase(),
       passwordHash,
-      passwordOrg: password,
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       dateOfBirth: dateOfBirth.trim(),
@@ -101,10 +121,24 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
-    const user = await User.findOne({ email: (email || '').trim().toLowerCase() });
-    if (!user) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
+    const ident = (email || '').trim().toLowerCase();
+    const user = await User.findOne({ email: ident });
+    if (!user) {
+      await logLogin({ kind: 'user', identifier: ident, success: false, reason: 'unknown_user', method: 'password', req });
+      return res.status(401).json({ ok: false, error: 'invalid_credentials' });
+    }
     const ok = await user.verifyPassword(password || '');
-    if (!ok) return res.status(401).json({ ok: false, error: 'invalid_credentials' });
+    if (!ok) {
+      await logLogin({ kind: 'user', subjectId: user._id, identifier: ident, success: false, reason: 'bad_password', method: 'password', req });
+      return res.status(401).json({ ok: false, error: 'invalid_credentials' });
+    }
+    let token;
+    try {
+      token = await issueToken(user, req, 'password');
+    } catch (e) {
+      if (e?.accountBlocked) return res.status(e.message === 'account_suspended' ? 403 : 401).json({ ok: false, error: e.message });
+      throw e;
+    }
     // ensure 1-week mock data exists for this user
     try {
       const now = new Date();
@@ -137,7 +171,7 @@ router.post('/login', async (req, res) => {
         if (evs.length) await Event.insertMany(evs, { ordered: false });
       }
     } catch (_) {}
-    return res.status(200).json({ token: sign(user) });
+    return res.status(200).json({ token });
   } catch (e) {
     return res.status(500).json({ ok: false, error: 'internal_error' });
   }
@@ -216,7 +250,7 @@ router.get('/google/callback', async (req, res) => {
     const name = payload.name;
 
     const user = await findOrCreateSocialUser('google', sub, email, name);
-    const token = sign(user);
+    const token = await issueToken(user, req, 'google');
     redirectWithToken(res, token);
   } catch (e) {
     console.error('[auth] google callback error', e?.message || e);
@@ -264,7 +298,7 @@ router.get('/kakao/callback', async (req, res) => {
     const name = kakaoUser.kakao_account?.profile?.nickname || kakaoUser.properties?.nickname || '';
 
     const user = await findOrCreateSocialUser('kakao', providerId, email, name);
-    const token = sign(user);
+    const token = await issueToken(user, req, 'kakao');
     redirectWithToken(res, token);
   } catch (e) {
     console.error('[auth] kakao callback error', e?.message || e);
@@ -285,7 +319,7 @@ router.post('/social/verify', async (req, res) => {
       const ticket = await client.verifyIdToken({ idToken, audience: clientId });
       const payload = ticket.getPayload();
       const user = await findOrCreateSocialUser('google', payload.sub, payload.email, payload.name);
-      return res.json({ ok: true, token: sign(user) });
+      return res.json({ ok: true, token: await issueToken(user, req, 'google') });
     }
 
     if (provider === 'kakao' && accessToken) {
@@ -298,7 +332,7 @@ router.post('/social/verify', async (req, res) => {
       const email = kakaoUser.kakao_account?.email || '';
       const name = kakaoUser.kakao_account?.profile?.nickname || kakaoUser.properties?.nickname || '';
       const user = await findOrCreateSocialUser('kakao', providerId, email, name);
-      return res.json({ ok: true, token: sign(user) });
+      return res.json({ ok: true, token: await issueToken(user, req, 'kakao') });
     }
 
     if (provider === 'apple' && idToken) {
@@ -309,11 +343,12 @@ router.post('/social/verify', async (req, res) => {
       const email = payload.email || '';
       const name = nameOverride || '';
       const user = await findOrCreateSocialUser('apple', sub, email, name);
-      return res.json({ ok: true, token: sign(user) });
+      return res.json({ ok: true, token: await issueToken(user, req, 'apple') });
     }
 
     return res.status(400).json({ ok: false, error: 'invalid_provider_or_token' });
   } catch (e) {
+    if (e?.accountBlocked) return res.status(e.message === 'account_suspended' ? 403 : 401).json({ ok: false, error: e.message });
     console.error('[auth] social verify error', e?.message || e);
     return res.status(500).json({ ok: false, error: 'internal_error' });
   }
@@ -322,13 +357,12 @@ router.post('/social/verify', async (req, res) => {
 // GET /api/auth/me — 토큰으로 프로필 조회 (login_req 권장)
 router.get('/me', async (req, res) => {
   try {
-    const h = req.headers.authorization || '';
-    const token = h.startsWith('Bearer ') ? h.slice(7) : null;
-    if (!token) return res.status(401).json({ error: 'no_token' });
-    const payload = jwt.verify(token, config.jwtSecret);
-    const user = await User.findById(payload.sub).lean();
+    const r = await verifyUserToken(req.headers.authorization);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    const user = await User.findById(r.userId).lean();
     if (!user) return res.status(401).json({ error: 'user_not_found' });
-    const { passwordHash, passwordOrg, ...safe } = user;
+    // 비밀번호 해시와 관리용 필드(메모·정지 사유·토큰 버전)는 회원에게 내보내지 않는다.
+    const { passwordHash, passwordOrg, adminNote, suspendedReason, tokenVersion, ...safe } = user;
     res.json({ ok: true, user: { ...safe, id: toUserId(safe._id) } });
   } catch (_) {
     return res.status(401).json({ error: 'invalid_token' });
@@ -338,21 +372,11 @@ router.get('/me', async (req, res) => {
 // POST /api/auth/refresh — 만료 전 토큰을 새 토큰으로 교체(슬라이딩 세션).
 // 앱은 토큰 발급 후 24시간이 지나면 호출한다. 만료·위조·삭제된 사용자는 401 → 앱이 재로그인 안내.
 router.post('/refresh', async (req, res) => {
-  const h = req.headers.authorization || '';
-  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
-  if (!token) return res.status(401).json({ ok: false, error: 'no_token', message: 'Authorization Bearer token required' });
-  let payload;
   try {
-    payload = jwt.verify(token, config.jwtSecret);
-  } catch (_) {
-    return res.status(401).json({ ok: false, error: 'invalid_token', message: 'JWT invalid or expired' });
-  }
-  // 관리자 토큰(sub='admin') 등 사용자 토큰이 아닌 것은 갱신 대상이 아니다.
-  if (!payload?.sub || !mongoose.isValidObjectId(payload.sub)) {
-    return res.status(401).json({ ok: false, error: 'invalid_token', message: 'Not a user token' });
-  }
-  try {
-    const user = await User.findById(payload.sub);
+    // 서명·만료뿐 아니라 정지·탈퇴·강제 로그아웃도 확인한다(그런 토큰은 연장되면 안 된다).
+    const r = await verifyUserToken(req.headers.authorization);
+    if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error, message: r.message });
+    const user = await User.findById(r.userId);
     if (!user) return res.status(401).json({ ok: false, error: 'user_not_found' });
     const next = sign(user);
     const { exp } = jwt.decode(next);

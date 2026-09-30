@@ -1,6 +1,5 @@
 import { WebSocketServer } from 'ws';
-import jwt from 'jsonwebtoken';
-import { config } from '../config.js';
+import { verifyAdminToken } from '../admin/auth.js';
 import { listDevicesEndingSoon } from '../services/devicesEndingSoon.js';
 
 /**
@@ -10,7 +9,7 @@ import { listDevicesEndingSoon } from '../services/devicesEndingSoon.js';
 export function attachDevicesEndingWs(server) {
   const wss = new WebSocketServer({ noServer: true });
 
-  server.on('upgrade', (req, socket, head) => {
+  server.on('upgrade', async (req, socket, head) => {
     try {
       const host = req.headers.host || 'localhost';
       const url = new URL(req.url || '/', `http://${host}`);
@@ -19,15 +18,14 @@ export function attachDevicesEndingWs(server) {
       return;
     }
       const token = url.searchParams.get('token') || '';
-      let payload;
-      try {
-        payload = jwt.verify(token, config.jwtSecret);
-      } catch {
+      // 관리자 계정·권한 확인(DB 계정, 분리된 서명 키)
+      const r = await verifyAdminToken(token);
+      if (!r.ok) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;
       }
-      if (payload?.role !== 'admin') {
+      if (!r.admin.perms.has('devices.read') || r.admin.mustChangePassword) {
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
         socket.destroy();
         return;

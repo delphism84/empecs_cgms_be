@@ -4,7 +4,7 @@
  * API 테스트: health, auth/login, auth/social, data, settings 엔드포인트
  * 사용: node scripts/qa-bot.js [BASE_URL] [--admin]
  *   --admin: 동일 BASE로 /api/admin/login → stats·users·devices·data 조회 (Admin Next 프록시 검증용, 예: :63103)
- * 관리자 비번: QA_ADMIN_USERNAME / QA_ADMIN_PASSWORD (기본 admin / Empecs!@34 — docker-compose 와 동일)
+ * 관리자 비번: QA_ADMIN_USERNAME / QA_ADMIN_PASSWORD (QA_ADMIN_PASSWORD 필수 — 저장소에 비밀번호를 두지 않는다)
  * 기본 BASE: http://127.0.0.1:40100 (docker) / http://127.0.0.1:63101 (BE 직접)
  */
 
@@ -105,7 +105,7 @@ async function main() {
 
   if (adminMode) {
     const adminUser = process.env.QA_ADMIN_USERNAME || 'admin';
-    const adminPass = process.env.QA_ADMIN_PASSWORD || 'Empecs!@34';
+    const adminPass = process.env.QA_ADMIN_PASSWORD || '';
     console.log('\n--- Admin API (docs/api.md /api/admin, same BASE) ---');
     const adminLogin = await req('POST', '/api/admin/login', { username: adminUser, password: adminPass });
     ok('POST /api/admin/login', adminLogin);

@@ -1,7 +1,6 @@
 import express from 'express';
-import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
-import { config } from '../config.js';
+import { userAuth, touchUpload } from '../lib/userAuth.js';
 import Event from '../models/Event.js';
 import GlucosePoint from '../models/GlucosePoint.js';
 
@@ -16,20 +15,8 @@ function logSync(route, req, startedAt, extra = {}) {
   console.log(`[sync] ${route} userId=${req.userId} durationMs=${ms}`, extra);
 }
 
-function auth(req, res, next) {
-  const h = req.headers.authorization || '';
-  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
-  if (!token) {
-    return res.status(401).json({ error: 'no_token', message: 'Authorization Bearer token required' });
-  }
-  try {
-    const payload = jwt.verify(token, config.jwtSecret);
-    req.userId = payload.sub;
-    next();
-  } catch (_) {
-    return res.status(401).json({ error: 'invalid_token', message: 'JWT invalid or expired' });
-  }
-}
+// 서명·계정 상태(정지·탈퇴)·강제 로그아웃을 함께 확인한다(lib/userAuth.js).
+const auth = userAuth;
 
 // glucose points
 router.get('/glucose', auth, async (req, res) => {
@@ -78,10 +65,30 @@ router.get('/glucose', auth, async (req, res) => {
   }
 });
 
+// 단건 등록 — (userId, eqsn, time) 기준 멱등. 앱이 타임아웃 뒤 같은 판독을 다시 보내도 중복되지 않는다.
+// 예전에는 매번 새 문서를 만들었고, 잘못된 time/value 는 처리되지 않은 예외로 요청이 멈췄다.
 router.post('/glucose', auth, async (req, res) => {
-  const { time, value, trid, eqsn } = req.body || {};
-  const item = await GlucosePoint.create({ userId: req.userId, eqsn: (eqsn ? String(eqsn).toUpperCase() : undefined), time: new Date(time), value, trid });
-  return res.json(item);
+  try {
+    const { time, value, trid, eqsn } = req.body || {};
+    const t = new Date(time);
+    const v = Number(value);
+    if (Number.isNaN(t.getTime())) return res.status(400).json({ error: 'invalid_time', message: 'time is not a valid date' });
+    if (!Number.isFinite(v)) return res.status(400).json({ error: 'invalid_value', message: 'value must be a number' });
+    const eqsnNorm = eqsn ? String(eqsn).toUpperCase() : null;
+    const setDoc = { userId: req.userId, time: t, value: v };
+    if (eqsnNorm) setDoc.eqsn = eqsnNorm;
+    if (trid !== undefined && trid !== null && Number.isFinite(Number(trid))) setDoc.trid = Number(trid);
+    const item = await GlucosePoint.findOneAndUpdate(
+      { userId: req.userId, time: t, eqsn: eqsnNorm },
+      { $set: setDoc },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+    touchUpload(req.userId);
+    return res.json(item);
+  } catch (e) {
+    console.error('[POST /glucose]', e?.message || e);
+    return res.status(500).json({ error: 'glucose_save_failed', message: 'Failed to save glucose point' });
+  }
 });
 
 // batch ingest (compact arrays) — 멱등 upsert: (userId+eqsn+time). trid 는 값으로만 저장(식별에 쓰지 않음)
@@ -169,6 +176,7 @@ router.post('/glucose/batch', auth, async (req, res) => {
     const upserted = result.upsertedCount ?? 0;
     const modified = result.modifiedCount ?? 0;
     const matched = result.matchedCount ?? 0;
+    touchUpload(req.userId);
     logSync('POST /data/glucose/batch', req, startedAt, {
       rows: docs.length,
       upserted,

@@ -1,6 +1,7 @@
 import express from 'express';
-import jwt from 'jsonwebtoken';
-import { config } from '../config.js';
+import { userAuth } from '../lib/userAuth.js';
+import { getSettings } from '../lib/settingsStore.js';
+import { checkRegistrationAllowed, syncUnitFromEq, recordEqHistory } from '../lib/deviceRegistry.js';
 import Sensor from '../models/Sensor.js';
 import Alarm from '../models/Alarm.js';
 import AppSetting from '../models/AppSetting.js';
@@ -9,20 +10,7 @@ import { normalizeBleMac, normalizeSerialQuery, userOwnsEq } from '../lib/eqNorm
 
 const router = express.Router();
 
-function auth(req, res, next) {
-  const h = req.headers.authorization || '';
-  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
-  if (!token) {
-    return res.status(401).json({ error: 'no_token', message: 'Authorization Bearer token required' });
-  }
-  try {
-    const payload = jwt.verify(token, config.jwtSecret);
-    req.userId = payload.sub;
-    next();
-  } catch (_) {
-    return res.status(401).json({ error: 'invalid_token', message: 'JWT invalid or expired' });
-  }
-}
+const auth = userAuth;
 
 // sensors
 router.get('/sensors', auth, async (req, res) => {
@@ -151,7 +139,8 @@ router.get('/eq-list/resolve', auth, async (req, res) => {
   }
 
   const doc = chosen.doc;
-  const EQ_VALIDITY_DAYS = Math.max(1, Math.min(90, Number(process.env.EQ_VALIDITY_DAYS || 14)));
+  // 유효기간은 시스템 설정 하나로 통일(앱과 같은 16일 기본). 예전 기본값 14일은 앱과 달랐다.
+  const EQ_VALIDITY_DAYS = (await getSettings()).eqValidityDays;
   const startMs = new Date(doc.startAt).getTime();
   const endMs = startMs + EQ_VALIDITY_DAYS * 24 * 60 * 60 * 1000;
   const remainingMinutes = Math.max(0, Math.floor((endMs - Date.now()) / 60000));
@@ -169,7 +158,9 @@ router.get('/eq-list/resolve', auth, async (req, res) => {
 router.get('/eq-list/:serial', auth, async (req, res) => {
   const { serial } = req.params;
   const doc = await Eq.findOne({ serial: serial.toUpperCase() }).lean();
-  return res.json(doc || {});
+  // 예전에는 소유자와 무관하게 행 전체(userId·MAC·시작시각)를 돌려줬다. 본인 소유가 아니면 빈 객체.
+  if (!doc || !userOwnsEq(doc, req.userId)) return res.json({});
+  return res.json(doc);
 });
 
 router.post('/eq-list', auth, async (req, res) => {
@@ -196,6 +187,13 @@ router.post('/eq-list', auth, async (req, res) => {
       });
     }
 
+    // 센서 재고(SN 대장) 정책: 차단된 SN 은 항상 거절, snPolicy='block' 이면 재고에 없는 SN 도 거절.
+    const denied = await checkRegistrationAllowed(sn);
+    if (denied) {
+      await recordEqHistory({ serial: sn, action: 'rejected', userId: req.userId, startAt: start, byKind: 'user', byId: String(req.userId), note: denied.body.error });
+      return res.status(denied.status).json(denied.body);
+    }
+
     const set = { startAt: start, updatedBy: req.userId, userId: req.userId };
     if (macNorm) set.bleMac = macNorm;
     const updated = await Eq.findOneAndUpdate(
@@ -203,6 +201,26 @@ router.post('/eq-list', auth, async (req, res) => {
       { $set: set, $setOnInsert: { createdBy: req.userId } },
       { new: true, upsert: true }
     );
+    // 재고 행에 등록 상태 복제 + 이력(시작시각·소유자가 바뀐 경우만 — 같은 값 재전송은 기록하지 않는다)
+    try {
+      await syncUnitFromEq(updated);
+      const startChanged = !existing || Math.abs(new Date(existing.startAt).getTime() - start.getTime()) > 60000;
+      const ownerChanged = existing && String(existing.userId || '') !== String(req.userId);
+      if (startChanged || ownerChanged) {
+        await recordEqHistory({
+          serial: sn,
+          action: existing ? 'reregister' : 'register',
+          userId: req.userId,
+          startAt: start,
+          prevUserId: existing?.userId,
+          prevStartAt: existing?.startAt,
+          byKind: 'user',
+          byId: String(req.userId),
+        });
+      }
+    } catch (e) {
+      console.error('[eq-list] registry sync', e?.message || e);
+    }
     return res.json(updated);
   } catch (e) {
     if (e && e.code === 11000) {
