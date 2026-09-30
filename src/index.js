@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'http';
 import cors from 'cors';
 import morgan from 'morgan';
 import mongoose from 'mongoose';
@@ -7,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { MongoMemoryServer } from 'mongodb-memory-server';
+import { attachDevicesEndingWs } from './ws/devicesEndingWs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, '..', 'public');
@@ -136,7 +138,9 @@ async function main() {
     console.warn('[mongo] syncIndexes(users):', e?.message || e);
   }
   await seedDefaultUser();
-  app.listen(config.port, config.host, () => console.log(`[server] listening on ${config.host}:${config.port}`));
+  const server = http.createServer(app);
+  attachDevicesEndingWs(server);
+  server.listen(config.port, config.host, () => console.log(`[server] listening on ${config.host}:${config.port}`));
 }
 
 main().catch((e) => {
