@@ -50,9 +50,16 @@ export function parsePeriod(query) {
   return Object.keys(range).length ? range : null;
 }
 
+const CJK_RE = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
+
+/** 표시 이름. 한글·한자·가나 이름은 "성이름"(김민지), 그 외는 "이름 성"(John Smith). */
 export function userLabel(u) {
   if (!u) return '—';
-  return u.name || [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || '—';
+  if (u.name) return u.name;
+  const first = String(u.firstName || '').trim();
+  const last = String(u.lastName || '').trim();
+  if (first || last) return CJK_RE.test(first + last) ? `${last}${first}` : [first, last].filter(Boolean).join(' ');
+  return u.email || '—';
 }
 
 export function userSearchQuery(text) {

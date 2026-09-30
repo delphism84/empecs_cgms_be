@@ -105,7 +105,8 @@ router.post('/register', async (req, res) => {
 
     return res.status(201).json({
       ok: true,
-      token: sign(user),
+      // 가입과 동시에 로그인된다 → 로그인 기록·마지막 로그인 시각을 남긴다.
+      token: await issueToken(user, req, 'register'),
       user: {
         id: toUserId(user._id),
         email: user.email,
